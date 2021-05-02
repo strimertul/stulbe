@@ -5,13 +5,16 @@ import (
 	"flag"
 	"fmt"
 	"io/fs"
-	"log"
 	"net/http"
 	"os"
+	"runtime"
 
 	"github.com/dgraph-io/badger/v3"
 	"github.com/gorilla/mux"
 	"github.com/nicklaw5/helix"
+
+	"github.com/mattn/go-colorable"
+	"github.com/sirupsen/logrus"
 )
 
 //go:embed frontend/dist/*
@@ -21,10 +24,42 @@ var db *badger.DB
 
 var client *helix.Client
 
+var log = logrus.New()
+
+func wrapLogger(module string) logrus.FieldLogger {
+	return log.WithField("module", module)
+}
+
+func parseLogLevel(level string) logrus.Level {
+	switch level {
+	case "error":
+		return logrus.ErrorLevel
+	case "warn", "warning":
+		return logrus.WarnLevel
+	case "info", "notice":
+		return logrus.InfoLevel
+	case "debug":
+		return logrus.DebugLevel
+	case "trace":
+		return logrus.TraceLevel
+	default:
+		return logrus.InfoLevel
+	}
+}
+
 func main() {
 	bind := flag.String("bind", ":9999", "Bind addr in format address:port")
 	dbdir := flag.String("dbfile", "data", "Filename for database")
+	loglevel := flag.String("loglevel", "info", "Logging level (debug, info, warn, error)")
 	flag.Parse()
+
+	log.SetLevel(parseLogLevel(*loglevel))
+
+	// Ok this is dumb but listen, I like colors.
+	if runtime.GOOS == "windows" {
+		log.SetFormatter(&logrus.TextFormatter{ForceColors: true})
+		log.SetOutput(colorable.NewColorableStdout())
+	}
 
 	// Get Twitch credentials from env
 	twitchClientID := os.Getenv("TWITCH_CLIENT_ID")
@@ -53,10 +88,10 @@ func main() {
 	client.SetAppAccessToken(resp.Data.AccessToken)
 
 	// Open DB
-	db, err = badger.Open(badger.DefaultOptions(*dbdir))
-	if err != nil {
-		fatalError(err, "Could not open DB")
-	}
+	options := badger.DefaultOptions(*dbdir)
+	options.Logger = wrapLogger("db")
+	db, err = badger.Open(options)
+	failOnError(err, "Could not open DB")
 	defer db.Close()
 
 	router := mux.NewRouter()
@@ -65,8 +100,15 @@ func main() {
 	fedir, _ := fs.Sub(frontend, "frontend/dist")
 	router.Handle("/", http.FileServer(http.FS(fedir)))
 	http.Handle("/", router)
-	log.Printf("starting web server at %s", *bind)
+	httpLogger := wrapLogger("http")
+	httpLogger.WithField("bind", *bind).Info("starting web server")
 	fatalError(http.ListenAndServe(*bind, nil), "HTTP server died unexepectedly")
+}
+
+func failOnError(err error, text string) {
+	if err != nil {
+		fatalError(err, text)
+	}
 }
 
 func fatalError(err error, text string) {
