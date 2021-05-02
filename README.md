@@ -4,7 +4,7 @@ Back-end portion of strimertul for features that require one:
 
 - Streamer "is live" checks
 
-Planned mocules:
+Planned modules include:
 
 - Webhook subscription for alerts
 - Loyalty tracking, APIs for redeems etc
