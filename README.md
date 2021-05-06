@@ -30,3 +30,23 @@ go build
 ## License
 
 The entire project is licensed under [AGPL-3.0-only](LICENSE) (see `LICENSE`).
+
+## FAQ
+
+### Does this scale?
+
+lol no it uses a single-writer on-disk KV store
+
+### Make it scale then!
+
+The aim of the strimertul suite is to be lean and hackable. Making a distributed cloud-native _\<more devop buzzwords here>_ thingamajig is way out of scope.
+
+If you have enough load you should consider going for Twitch Partner or making your own system (or fork us and make a stulbe-at-scale, FOSS for the win!)
+
+### Where's the API docs?
+
+Soon™
+
+### Gib awoos
+
+[Here you go](https://youtu.be/pKcR7qHlAIA?list=LL&t=75)
