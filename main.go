@@ -1,13 +1,12 @@
 package main
 
 import (
-	"embed"
 	"flag"
 	"fmt"
-	"io/fs"
 	"net/http"
 	"os"
 	"runtime"
+	"strings"
 
 	"github.com/dgraph-io/badger/v3"
 	"github.com/gorilla/mux"
@@ -15,16 +14,15 @@ import (
 
 	"github.com/mattn/go-colorable"
 	"github.com/sirupsen/logrus"
+
+	"github.com/strimertul/stulbe/auth"
+	"github.com/strimertul/stulbe/database"
 )
 
-//go:embed frontend/dist/*
-var frontend embed.FS
-
-var db *badger.DB
-
-var client *helix.Client
-
+var db *database.DB
+var authStore *auth.Storage
 var log = logrus.New()
+var client *helix.Client
 
 func wrapLogger(module string) logrus.FieldLogger {
 	return log.WithField("module", module)
@@ -51,6 +49,8 @@ func main() {
 	bind := flag.String("bind", ":9999", "Bind addr in format address:port")
 	dbdir := flag.String("dbfile", "data", "Filename for database")
 	loglevel := flag.String("loglevel", "info", "Logging level (debug, info, warn, error)")
+	bootstrap := flag.String("bootstrap", "", "Create admin user with given credentials (user:token)")
+	regenerateSecret := flag.Bool("regen-secret", false, "Force secret key generation, this will invalidate all previous session!")
 	flag.Parse()
 
 	log.SetLevel(parseLogLevel(*loglevel))
@@ -59,6 +59,34 @@ func main() {
 	if runtime.GOOS == "windows" {
 		log.SetFormatter(&logrus.TextFormatter{ForceColors: true})
 		log.SetOutput(colorable.NewColorableStdout())
+	}
+
+	// Open DB
+	var err error
+	db, err = database.Open(badger.DefaultOptions(*dbdir), wrapLogger("db"))
+	failOnError(err, "Could not open DB")
+	defer db.Close()
+
+	authStore, err = auth.Init(db, auth.Options{
+		Logger:              wrapLogger("auth"),
+		ForgeGenerateSecret: *regenerateSecret,
+	})
+	failOnError(err, "Could not initialize auth store")
+
+	if *bootstrap != "" {
+		parts := strings.SplitN(*bootstrap, ":", 2)
+		if len(parts) < 2 || len(parts[0]) < 1 || len(parts[1]) < 1 {
+			log.Fatalf("-bootstrap argument requires credentials in format username:token")
+		}
+
+		// Add administrator
+		failOnError(authStore.AddUser(parts[0], parts[1], auth.ULAdmin), "Error adding admin user")
+
+		log.WithField("user", parts[0]).Infof("Created admin user")
+	} else {
+		if authStore.CountUsers() < 1 {
+			log.Warn("No config found, you should start stulbe with -boostrap to set-up an administrator!")
+		}
 	}
 
 	// Get Twitch credentials from env
@@ -70,7 +98,6 @@ func main() {
 	}
 
 	// Create Twitch client
-	var err error
 	client, err = helix.NewClient(&helix.Options{
 		ClientID:     twitchClientID,
 		ClientSecret: twitchClientSecret,
@@ -87,18 +114,9 @@ func main() {
 	// Set the access token on the client
 	client.SetAppAccessToken(resp.Data.AccessToken)
 
-	// Open DB
-	options := badger.DefaultOptions(*dbdir)
-	options.Logger = wrapLogger("db")
-	db, err = badger.Open(options)
-	failOnError(err, "Could not open DB")
-	defer db.Close()
-
 	router := mux.NewRouter()
 	apiRouter := router.PathPrefix("/api").Subrouter()
 	bindApiRoutes(apiRouter)
-	fedir, _ := fs.Sub(frontend, "frontend/dist")
-	router.Handle("/", http.FileServer(http.FS(fedir)))
 	http.Handle("/", router)
 	httpLogger := wrapLogger("http")
 	httpLogger.WithField("bind", *bind).Info("starting web server")
