@@ -1,6 +1,6 @@
 package api
 
-type RequestError struct {
+type ResponseError struct {
 	Ok    bool   `json:"ok"`
 	Error string `json:"error"`
 }

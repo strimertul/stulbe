@@ -88,7 +88,7 @@ func apiStreamerStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func unauthorized(w http.ResponseWriter) {
-	msg, _ := jsoniter.ConfigFastest.MarshalToString(api.RequestError{Ok: false, Error: "authentication required"})
+	msg, _ := jsoniter.ConfigFastest.MarshalToString(api.ResponseError{Ok: false, Error: "authentication required"})
 	jsonErr(w, msg, http.StatusUnauthorized)
 }
 
