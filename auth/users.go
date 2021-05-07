@@ -2,14 +2,17 @@ package auth
 
 import (
 	"errors"
+	"time"
 
 	"github.com/dgrijalva/jwt-go"
 	"golang.org/x/crypto/bcrypt"
 )
 
 var (
-	ErrUserNotFound = errors.New("user not found")
-	ErrInvalidKey   = errors.New("invalid auth")
+	ErrUserNotFound     = errors.New("user not found")
+	ErrInvalidKey       = errors.New("invalid auth")
+	ErrTokenParseFailed = errors.New("couldnt parse jwt")
+	ErrTokenExpired     = errors.New("token expired")
 )
 
 type UserList map[string]User
@@ -92,4 +95,29 @@ func (db *Storage) Authenticate(username string, key string, claims jwt.Standard
 	signedToken, err := token.SignedString(db.secretKey)
 
 	return userClaims, signedToken, err
+}
+
+func (db *Storage) Verify(token string) error {
+	tk, err := jwt.ParseWithClaims(
+		token,
+		&UserClaims{},
+		func(token *jwt.Token) (interface{}, error) {
+			return db.secretKey, nil
+		},
+	)
+
+	if err != nil {
+		return err
+	}
+
+	claims, ok := tk.Claims.(*UserClaims)
+	if !ok {
+		return ErrTokenParseFailed
+	}
+
+	if claims.ExpiresAt < time.Now().Unix() {
+		return ErrTokenExpired
+	}
+
+	return nil
 }

@@ -22,6 +22,7 @@ import (
 var db *database.DB
 var authStore *auth.Storage
 var log = logrus.New()
+var httpLogger logrus.FieldLogger
 var client *helix.Client
 
 func wrapLogger(module string) logrus.FieldLogger {
@@ -118,7 +119,7 @@ func main() {
 	apiRouter := router.PathPrefix("/api").Subrouter()
 	bindApiRoutes(apiRouter)
 	http.Handle("/", router)
-	httpLogger := wrapLogger("http")
+	httpLogger = wrapLogger("http")
 	httpLogger.WithField("bind", *bind).Info("starting web server")
 	fatalError(http.ListenAndServe(*bind, nil), "HTTP server died unexepectedly")
 }
