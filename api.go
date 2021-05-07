@@ -53,7 +53,7 @@ func wrapAuth(handler http.HandlerFunc) http.HandlerFunc {
 			case auth.ErrTokenParseFailed:
 				jsonErr(w, "invalid token", http.StatusBadRequest)
 			default:
-				jsonErr(w, err.Error(), http.StatusInternalServerError)
+				jsonErr(w, err.Error(), http.StatusBadRequest)
 			}
 			return
 		}
