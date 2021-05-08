@@ -37,6 +37,10 @@ func Open(options badger.Options, logger logrus.FieldLogger) (*DB, error) {
 	}, err
 }
 
+func (db *DB) Client() *badger.DB {
+	return db.client
+}
+
 func (db *DB) Close() {
 	db.Close()
 }

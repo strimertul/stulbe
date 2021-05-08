@@ -10,10 +10,11 @@ import (
 
 	"github.com/dgraph-io/badger/v3"
 	"github.com/gorilla/mux"
-	"github.com/nicklaw5/helix"
-
 	"github.com/mattn/go-colorable"
+	"github.com/nicklaw5/helix"
 	"github.com/sirupsen/logrus"
+
+	kv "github.com/strimertul/kilovolt/v2"
 
 	"github.com/strimertul/stulbe/auth"
 	"github.com/strimertul/stulbe/database"
@@ -68,6 +69,10 @@ func main() {
 	failOnError(err, "Could not open DB")
 	defer db.Close()
 
+	// Initialize KV (required)
+	hub := kv.NewHub(db.Client(), wrapLogger("kv"))
+	go hub.Run()
+
 	authStore, err = auth.Init(db, auth.Options{
 		Logger:              wrapLogger("auth"),
 		ForgeGenerateSecret: *regenerateSecret,
@@ -119,6 +124,9 @@ func main() {
 	apiRouter := router.PathPrefix("/api").Subrouter()
 	bindApiRoutes(apiRouter)
 	http.Handle("/", router)
+	http.HandleFunc("/ws", wrapAuth(func(w http.ResponseWriter, r *http.Request) {
+		kv.ServeWs(hub, w, r)
+	}))
 	httpLogger = wrapLogger("http")
 	httpLogger.WithField("bind", *bind).Info("starting web server")
 	fatalError(http.ListenAndServe(*bind, nil), "HTTP server died unexepectedly")
