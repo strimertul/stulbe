@@ -97,7 +97,7 @@ func (db *Storage) Authenticate(username string, key string, claims jwt.Standard
 	return userClaims, signedToken, err
 }
 
-func (db *Storage) Verify(token string) error {
+func (db *Storage) Verify(token string) (*UserClaims, error) {
 	tk, err := jwt.ParseWithClaims(
 		token,
 		&UserClaims{},
@@ -107,17 +107,17 @@ func (db *Storage) Verify(token string) error {
 	)
 
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	claims, ok := tk.Claims.(*UserClaims)
 	if !ok {
-		return ErrTokenParseFailed
+		return nil, ErrTokenParseFailed
 	}
 
 	if claims.ExpiresAt < time.Now().Unix() {
-		return ErrTokenExpired
+		return nil, ErrTokenExpired
 	}
 
-	return nil
+	return claims, nil
 }

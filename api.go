@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -19,6 +20,12 @@ type APIError struct {
 	Ok    bool   `json:"ok"`
 	Error string `json:"error"`
 }
+
+type contextKey int
+
+const (
+	authKey contextKey = iota
+)
 
 func bindApiRoutes(r *mux.Router) {
 	get := r.Methods("GET").Subrouter()
@@ -45,7 +52,7 @@ func wrapAuth(handler http.HandlerFunc) http.HandlerFunc {
 
 		token := parts[1]
 
-		err := authStore.Verify(token)
+		claims, err := authStore.Verify(token)
 		if err != nil {
 			switch err {
 			case auth.ErrTokenExpired:
@@ -58,7 +65,8 @@ func wrapAuth(handler http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 
-		handler(w, r)
+		ctx := context.WithValue(r.Context(), authKey, claims)
+		handler(w, r.WithContext(ctx))
 	}
 }
 

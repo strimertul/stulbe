@@ -125,11 +125,21 @@ func main() {
 	bindApiRoutes(apiRouter)
 	http.Handle("/", router)
 	http.HandleFunc("/ws", wrapAuth(func(w http.ResponseWriter, r *http.Request) {
-		kv.ServeWs(hub, w, r)
+		// Get user context
+		claims := r.Context().Value(authKey).(*auth.UserClaims)
+		hub.CreateClient(w, r, kv.ClientOptions{
+			RemapKeyFn: remapForUser(claims.User),
+		})
 	}))
 	httpLogger = wrapLogger("http")
 	httpLogger.WithField("bind", *bind).Info("starting web server")
 	fatalError(http.ListenAndServe(*bind, nil), "HTTP server died unexepectedly")
+}
+
+func remapForUser(user string) func(string) string {
+	return func(key string) string {
+		return "@userdata/" + user + "/" + key
+	}
 }
 
 func failOnError(err error, text string) {
