@@ -25,7 +25,7 @@ type Client struct {
 }
 
 func NewClient(options ClientOptions) (*Client, error) {
-	if options.Logger != nil {
+	if options.Logger == nil {
 		options.Logger = logrus.New()
 	}
 
