@@ -40,6 +40,7 @@ func NewClient(options ClientOptions) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
+	options.Logger.Debug("client authenticated")
 
 	// Create kilovolt client
 	client.KV, err = kvclient.NewClient(options.Endpoint+"/ws", kvclient.ClientOptions{
@@ -48,6 +49,7 @@ func NewClient(options ClientOptions) (*Client, error) {
 			"Authorization": []string{"Bearer " + client.token},
 		},
 	})
+	options.Logger.Debug("kv client connected")
 
 	return client, err
 }
