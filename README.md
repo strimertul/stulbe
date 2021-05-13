@@ -33,6 +33,10 @@ The entire project is licensed under [AGPL-3.0-only](LICENSE) (see `LICENSE`).
 
 ## FAQ
 
+### How do I use it?
+
+Swagger or whatever docs coming soon, meanwhile look at [this Go client](github.com/strimertul/stulbe-client-go).
+
 ### Does this scale?
 
 lol no it uses a single-writer on-disk KV store
