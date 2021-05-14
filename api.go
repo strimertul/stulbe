@@ -11,9 +11,12 @@ import (
 	"github.com/dgrijalva/jwt-go"
 	"github.com/gorilla/mux"
 	jsoniter "github.com/json-iterator/go"
-	"github.com/nicklaw5/helix"
+
+	"github.com/strimertul/strimertul/modules/loyalty"
+
 	"github.com/strimertul/stulbe/api"
 	"github.com/strimertul/stulbe/auth"
+	"github.com/strimertul/stulbe/database"
 )
 
 type APIError struct {
@@ -28,12 +31,28 @@ const (
 )
 
 func bindApiRoutes(r *mux.Router) {
+	r.Use(cors)
 	get := r.Methods("GET").Subrouter()
 	post := r.Methods("POST").Subrouter()
 
 	post.HandleFunc("/auth", apiAuth)
-	get.HandleFunc("/stream/{streamer}/info", wrapAuth(apiStreamerInfo))
-	get.HandleFunc("/stream/{streamer}/status", wrapAuth(apiStreamerStatus))
+	get.HandleFunc("/stream/{streamer}/loyalty/rewards", apiLoyaltyRewards)
+	get.HandleFunc("/stream/{streamer}/loyalty/goals", apiLoyaltyGoals)
+	get.HandleFunc("/stream/{streamer}/loyalty/points/{user}", apiLoyaltyUserPoints)
+}
+
+func cors(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS,PUT")
+		w.Header().Set("Access-Control-Allow-Headers", "Origin, Content-Type")
+
+		if r.Method == "OPTIONS" {
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
 }
 
 // wrapAuth implements Basic Auth authorization for provided endpoints
@@ -100,38 +119,52 @@ func apiAuth(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func apiStreamerInfo(w http.ResponseWriter, r *http.Request) {
+func apiLoyaltyRewards(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
-	streamerLogin := vars["streamer"]
-	resp, err := client.GetUsers(&helix.UsersParams{
-		Logins: []string{streamerLogin},
-	})
-	if err != nil {
-		jsonErr(w, err.Error(), http.StatusInternalServerError)
+	rewardKey := remapForUser(vars["streamer"])(loyalty.RewardsKey)
+
+	data := loyalty.RewardStorage{}
+	err := db.GetJSON(rewardKey, &data)
+	if err != nil && err != database.ErrKeyNotFound {
+		jsonErr(w, "error fetching data: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	if resp.Error != "" {
-		jsonErr(w, fmt.Sprintf("helix returned error: %s", resp.Error), http.StatusInternalServerError)
-		return
-	}
-	jsonResponse(w, resp.Data.Users)
+
+	jsonResponse(w, data)
 }
 
-func apiStreamerStatus(w http.ResponseWriter, r *http.Request) {
+func apiLoyaltyGoals(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
-	streamerLogin := vars["streamer"]
-	resp, err := client.GetStreams(&helix.StreamsParams{
-		UserLogins: []string{streamerLogin},
-	})
-	if err != nil {
-		jsonErr(w, err.Error(), http.StatusInternalServerError)
+	goalKey := remapForUser(vars["streamer"])(loyalty.GoalsKey)
+
+	data := loyalty.GoalStorage{}
+	err := db.GetJSON(goalKey, &data)
+	if err != nil && err != database.ErrKeyNotFound {
+		jsonErr(w, "error fetching data: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	if resp.Error != "" {
-		jsonErr(w, fmt.Sprintf("helix returned error: %s", resp.Error), http.StatusInternalServerError)
+
+	jsonResponse(w, data)
+}
+
+func apiLoyaltyUserPoints(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	pointsKey := remapForUser(vars["streamer"])(loyalty.PointsKey)
+	user := vars["user"]
+
+	data := make(loyalty.PointStorage)
+	err := db.GetJSON(pointsKey, &data)
+	if err != nil && err != database.ErrKeyNotFound {
+		jsonErr(w, "error fetching data: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	jsonResponse(w, resp.Data.Streams)
+
+	balance := int64(0)
+	if val, ok := data[user]; ok {
+		balance = val
+	}
+
+	jsonResponse(w, balance)
 }
 
 func unauthorized(w http.ResponseWriter) {

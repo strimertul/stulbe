@@ -133,6 +133,7 @@ func main() {
 	}))
 	httpLogger = wrapLogger("http")
 	httpLogger.WithField("bind", *bind).Info("starting web server")
+
 	fatalError(http.ListenAndServe(*bind, nil), "HTTP server died unexepectedly")
 }
 
