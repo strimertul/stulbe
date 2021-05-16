@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"github.com/dgrijalva/jwt-go"
 	"github.com/gorilla/mux"
 	jsoniter "github.com/json-iterator/go"
+	"github.com/nicklaw5/helix"
 
 	"github.com/strimertul/strimertul/modules/loyalty"
 
@@ -36,9 +38,10 @@ func bindApiRoutes(r *mux.Router) {
 	post := r.Methods("POST").Subrouter()
 
 	post.HandleFunc("/auth", apiAuth)
-	get.HandleFunc("/stream/{streamer}/loyalty/rewards", apiLoyaltyRewards)
-	get.HandleFunc("/stream/{streamer}/loyalty/goals", apiLoyaltyGoals)
-	get.HandleFunc("/stream/{streamer}/loyalty/points/{user}", apiLoyaltyUserPoints)
+	get.HandleFunc("/stream/{channelid}/loyalty/config", apiLoyaltyConfig)
+	get.HandleFunc("/stream/{channelid}/loyalty/rewards", apiLoyaltyRewards)
+	get.HandleFunc("/stream/{channelid}/loyalty/goals", apiLoyaltyGoals)
+	get.HandleFunc("/stream/{channelid}/loyalty/info/{uid}", apiLoyaltyUserData)
 }
 
 func cors(next http.Handler) http.Handler {
@@ -119,12 +122,44 @@ func apiAuth(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func apiLoyaltyConfig(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+
+	channel, err := getChannelByID(vars["channelid"])
+	if err != nil {
+		jsonErr(w, "error fetching channel data: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	configKey := userNamespace(channel) + loyalty.ConfigKey
+
+	data := loyalty.Config{}
+	err = db.GetJSON(configKey, &data)
+	if err != nil && err != database.ErrKeyNotFound {
+		jsonErr(w, "error fetching data: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	jsonResponse(w, struct {
+		Currency string `json:"currency"`
+		Interval int64  `json:"interval"`
+	}{
+		Currency: data.Currency,
+		Interval: data.Points.Interval,
+	})
+}
+
 func apiLoyaltyRewards(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
-	rewardKey := remapForUser(vars["streamer"])(loyalty.RewardsKey)
+
+	channel, err := getChannelByID(vars["channelid"])
+	if err != nil {
+		jsonErr(w, "error fetching channel data: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	rewardKey := userNamespace(channel) + loyalty.RewardsKey
 
 	data := loyalty.RewardStorage{}
-	err := db.GetJSON(rewardKey, &data)
+	err = db.GetJSON(rewardKey, &data)
 	if err != nil && err != database.ErrKeyNotFound {
 		jsonErr(w, "error fetching data: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -135,10 +170,16 @@ func apiLoyaltyRewards(w http.ResponseWriter, r *http.Request) {
 
 func apiLoyaltyGoals(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
-	goalKey := remapForUser(vars["streamer"])(loyalty.GoalsKey)
+
+	channel, err := getChannelByID(vars["channelid"])
+	if err != nil {
+		jsonErr(w, "error fetching channel data: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	goalKey := userNamespace(channel) + loyalty.GoalsKey
 
 	data := loyalty.GoalStorage{}
-	err := db.GetJSON(goalKey, &data)
+	err = db.GetJSON(goalKey, &data)
 	if err != nil && err != database.ErrKeyNotFound {
 		jsonErr(w, "error fetching data: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -147,24 +188,87 @@ func apiLoyaltyGoals(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, data)
 }
 
-func apiLoyaltyUserPoints(w http.ResponseWriter, r *http.Request) {
+func apiLoyaltyUserData(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
-	pointsKey := remapForUser(vars["streamer"])(loyalty.PointsKey)
-	user := vars["user"]
 
-	data := make(loyalty.PointStorage)
-	err := db.GetJSON(pointsKey, &data)
-	if err != nil && err != database.ErrKeyNotFound {
-		jsonErr(w, "error fetching data: "+err.Error(), http.StatusInternalServerError)
+	channel, err := getChannelByID(vars["channelid"])
+	if err != nil {
+		jsonErr(w, "error fetching channel data: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	balance := int64(0)
-	if val, ok := data[user]; ok {
-		balance = val
+	userid := vars["uid"]
+	if !strings.HasPrefix(userid, "U") {
+		jsonErr(w, "invalid user id", http.StatusBadRequest)
+		return
+	}
+	user, err := getUserByID(userid[1:])
+	if err != nil {
+		jsonErr(w, "error fetching username: "+err.Error(), http.StatusInternalServerError)
+		return
 	}
 
-	jsonResponse(w, balance)
+	pointsKey := userNamespace(channel) + loyalty.PointsPrefix + user.Login
+	var data loyalty.PointsEntry
+	err = db.GetJSON(pointsKey, &data)
+	if err != nil {
+		if err != database.ErrKeyNotFound {
+			jsonErr(w, "error fetching points: "+err.Error(), http.StatusInternalServerError)
+			return
+		} else {
+			data = loyalty.PointsEntry{Points: 0}
+		}
+	}
+
+	jsonResponse(w, struct {
+		DisplayName string `json:"display_name"`
+		Balance     int64  `json:"balance"`
+	}{
+		DisplayName: user.DisplayName,
+		Balance:     data.Points,
+	})
+}
+
+func getChannelByID(channelid string) (string, error) {
+	channelName, ok := channelcache.Get(channelid)
+	if !ok {
+		resp, err := client.GetChannelInformation(&helix.GetChannelInformationParams{
+			BroadcasterID: channelid,
+		})
+		if err != nil {
+			return "", fmt.Errorf("error fetching data: " + err.Error())
+		}
+		if resp.Error != "" {
+			return "", errors.New(resp.Error)
+		}
+		if len(resp.Data.Channels) < 1 {
+			return "", errors.New("user id not found")
+		}
+		channelName = strings.ToLower(resp.Data.Channels[0].BroadcasterName)
+		channelcache.Add(channelid, channelName)
+	}
+	return channelName.(string), nil
+}
+
+func getUserByID(userid string) (helix.User, error) {
+	username, ok := usercache.Get(userid)
+	if !ok {
+		resp, err := client.GetUsers(&helix.UsersParams{
+			IDs: []string{userid},
+		})
+		if err != nil {
+			return helix.User{}, fmt.Errorf("error fetching data: " + err.Error())
+		}
+		if resp.Error != "" {
+			return helix.User{}, errors.New(resp.Error)
+		}
+		if len(resp.Data.Users) < 1 {
+			return helix.User{}, errors.New("user id not found")
+		}
+		username = resp.Data.Users[0]
+		usercache.Add(userid, username)
+	}
+	return username.(helix.User), nil
 }
 
 func unauthorized(w http.ResponseWriter) {

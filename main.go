@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"net/http"
@@ -10,11 +11,12 @@ import (
 
 	"github.com/dgraph-io/badger/v3"
 	"github.com/gorilla/mux"
+	lru "github.com/hashicorp/golang-lru"
 	"github.com/mattn/go-colorable"
 	"github.com/nicklaw5/helix"
 	"github.com/sirupsen/logrus"
 
-	kv "github.com/strimertul/kilovolt/v3"
+	kv "github.com/strimertul/kilovolt/v4"
 
 	"github.com/strimertul/stulbe/auth"
 	"github.com/strimertul/stulbe/database"
@@ -25,6 +27,9 @@ var authStore *auth.Storage
 var log = logrus.New()
 var httpLogger logrus.FieldLogger
 var client *helix.Client
+
+var usercache *lru.Cache
+var channelcache *lru.Cache
 
 func wrapLogger(module string) logrus.FieldLogger {
 	return log.WithField("module", module)
@@ -69,8 +74,15 @@ func main() {
 	failOnError(err, "Could not open DB")
 	defer db.Close()
 
+	// Initialize caches to avoid spamming Twitch's APIs
+	usercache, err = lru.New(128)
+	failOnError(err, "Could not create LRU cache for users")
+	channelcache, err = lru.New(128)
+	failOnError(err, "Could not create LRU cache for channels")
+
 	// Initialize KV (required)
-	hub := kv.NewHub(db.Client(), wrapLogger("kv"))
+	hub, err := kv.NewHub(db.Client(), wrapLogger("kv"))
+	failOnError(err, "Could not initialize KV hub")
 	go hub.Run()
 
 	authStore, err = auth.Init(db, auth.Options{
@@ -112,13 +124,17 @@ func main() {
 		fatalError(err, "Failed to initialize Twitch helix client")
 	}
 
-	resp, err := client.RequestAppAccessToken([]string{"user:read:email"})
+	resp, err := client.RequestAppAccessToken([]string{})
 	if err != nil {
 		fatalError(err, "Failed to get Twitch helix app token")
+	}
+	if resp.Error != "" {
+		fatalError(errors.New(resp.Error), "Failed to get Twitch helix app token")
 	}
 
 	// Set the access token on the client
 	client.SetAppAccessToken(resp.Data.AccessToken)
+	log.Info("helix api access authorized")
 
 	router := mux.NewRouter()
 	apiRouter := router.PathPrefix("/api").Subrouter()
@@ -128,7 +144,7 @@ func main() {
 		// Get user context
 		claims := r.Context().Value(authKey).(*auth.UserClaims)
 		hub.CreateClient(w, r, kv.ClientOptions{
-			RemapKeyFn: remapForUser(claims.User),
+			Namespace: userNamespace(claims.User),
 		})
 	}))
 	httpLogger = wrapLogger("http")
@@ -137,10 +153,8 @@ func main() {
 	fatalError(http.ListenAndServe(*bind, nil), "HTTP server died unexepectedly")
 }
 
-func remapForUser(user string) func(string) string {
-	return func(key string) string {
-		return "@userdata/" + user + "/" + key
-	}
+func userNamespace(user string) string {
+	return "@userdata/" + user + "/"
 }
 
 func failOnError(err error, text string) {
