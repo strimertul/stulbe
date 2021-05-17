@@ -1,5 +1,9 @@
 package api
 
+type StatusResponse struct {
+	Ok bool `json:"ok"`
+}
+
 type ResponseError struct {
 	Ok    bool   `json:"ok"`
 	Error string `json:"error"`
@@ -16,3 +20,13 @@ type AuthResponse struct {
 	Level string `json:"level"`
 	Token string `json:"token"`
 }
+
+const KVKeyPrefix = "stulbe/"
+
+type ExLoyaltyRedeem struct {
+	User     string `json:"user"`
+	Channel  string `json:"channel"`
+	RewardID string `json:"reward_id"`
+}
+
+const KVExLoyaltyRedeem = "stulbe/loyalty/@redeem-rpc"

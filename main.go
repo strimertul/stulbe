@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/base64"
 	"errors"
 	"flag"
 	"fmt"
@@ -27,6 +28,7 @@ var authStore *auth.Storage
 var log = logrus.New()
 var httpLogger logrus.FieldLogger
 var client *helix.Client
+var twitchExtensionJWT []byte
 
 var usercache *lru.Cache
 var channelcache *lru.Cache
@@ -113,6 +115,15 @@ func main() {
 
 	if twitchClientID == "" || twitchClientSecret == "" {
 		fatalError(fmt.Errorf("TWITCH_CLIENT_ID and TWITCH_CLIENT_SECRET env vars must be set to a Twitch application credentials"), "Missing configuration")
+	}
+
+	// Get Twitch extension JWT secret
+	twitchExtensionJWTStr := os.Getenv("TWITCH_EXTENSION_JWT")
+	if twitchExtensionJWTStr == "" {
+		log.Warn("Environment variable TWITCH_EXTENSION_JWT is empty or unset! Incoming requests from twitch panels won't be able to be validated!")
+	} else {
+		twitchExtensionJWT, err = base64.StdEncoding.DecodeString(twitchExtensionJWTStr)
+		failOnError(err, "Could not decode value for TWITCH_EXTENSION_JWT (expected base64)")
 	}
 
 	// Create Twitch client

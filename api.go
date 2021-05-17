@@ -37,11 +37,17 @@ func bindApiRoutes(r *mux.Router) {
 	get := r.Methods("GET").Subrouter()
 	post := r.Methods("POST").Subrouter()
 
+	// Auth endpoint (for privileged apps)
 	post.HandleFunc("/auth", apiAuth)
+
+	// Loyalty endpoints (public)
 	get.HandleFunc("/stream/{channelid}/loyalty/config", apiLoyaltyConfig)
 	get.HandleFunc("/stream/{channelid}/loyalty/rewards", apiLoyaltyRewards)
 	get.HandleFunc("/stream/{channelid}/loyalty/goals", apiLoyaltyGoals)
 	get.HandleFunc("/stream/{channelid}/loyalty/info/{uid}", apiLoyaltyUserData)
+
+	// Redeem endpoints (for twitch users)
+	post.HandleFunc("/twitch-ext/reward/redeem", apiExLoyaltyRedeem)
 }
 
 func cors(next http.Handler) http.Handler {
@@ -227,6 +233,60 @@ func apiLoyaltyUserData(w http.ResponseWriter, r *http.Request) {
 		DisplayName: user.DisplayName,
 		Balance:     data.Points,
 	})
+}
+
+func apiExLoyaltyRedeem(w http.ResponseWriter, r *http.Request) {
+	// Get user data
+	var data struct {
+		Token    string `json:"token"`
+		RewardID string `json:"reward_id"`
+	}
+	err := jsoniter.ConfigFastest.NewDecoder(r.Body).Decode(&data)
+	if err != nil {
+		jsonErr(w, "error decoding JSON: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Parse JWT and extract data from it
+	t, err := jwt.ParseWithClaims(data.Token, jwt.MapClaims{}, func(t *jwt.Token) (interface{}, error) {
+		return twitchExtensionJWT, nil
+	})
+	if err != nil {
+		jsonErr(w, "error decoding JWT token: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	claims, ok := t.Claims.(jwt.MapClaims)
+	if !ok {
+		jsonErr(w, "something's wrong I can feel it", http.StatusInternalServerError)
+		return
+	}
+
+	// Get channel/user from IDs
+	channel, err := getChannelByID(claims["channel_id"].(string))
+	if err != nil {
+		jsonErr(w, "error fetching channel data: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	user, err := getUserByID(claims["user_id"].(string))
+	if err != nil {
+		jsonErr(w, "error fetching username: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Send event to hub via database
+	err = db.PutJSON(userNamespace(channel)+api.KVExLoyaltyRedeem, api.ExLoyaltyRedeem{
+		User:     user.Login,
+		Channel:  channel,
+		RewardID: data.RewardID,
+	})
+	if err != nil {
+		jsonErr(w, "error sending request to DB: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	jsonResponse(w, api.StatusResponse{Ok: true})
 }
 
 func getChannelByID(channelid string) (string, error) {
