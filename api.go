@@ -238,8 +238,9 @@ func apiLoyaltyUserData(w http.ResponseWriter, r *http.Request) {
 func apiExLoyaltyRedeem(w http.ResponseWriter, r *http.Request) {
 	// Get user data
 	var data struct {
-		Token    string `json:"token"`
-		RewardID string `json:"reward_id"`
+		Token       string `json:"token"`
+		RewardID    string `json:"reward_id"`
+		RequestText string `json:"request_text"`
 	}
 	err := jsoniter.ConfigFastest.NewDecoder(r.Body).Decode(&data)
 	if err != nil {
@@ -281,6 +282,7 @@ func apiExLoyaltyRedeem(w http.ResponseWriter, r *http.Request) {
 		DisplayName: user.DisplayName,
 		Channel:     channel,
 		RewardID:    data.RewardID,
+		RequestText: data.RequestText,
 	})
 	if err != nil {
 		jsonErr(w, "error sending request to DB: "+err.Error(), http.StatusInternalServerError)

@@ -28,6 +28,7 @@ type ExLoyaltyRedeem struct {
 	DisplayName string `json:"display_name"`
 	Channel     string `json:"channel"`
 	RewardID    string `json:"reward_id"`
+	RequestText string `json:"request_text"`
 }
 
 const KVExLoyaltyRedeem = "stulbe/loyalty/@redeem-rpc"
