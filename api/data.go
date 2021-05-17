@@ -24,9 +24,10 @@ type AuthResponse struct {
 const KVKeyPrefix = "stulbe/"
 
 type ExLoyaltyRedeem struct {
-	User     string `json:"user"`
-	Channel  string `json:"channel"`
-	RewardID string `json:"reward_id"`
+	Username    string `json:"username"`
+	DisplayName string `json:"display_name"`
+	Channel     string `json:"channel"`
+	RewardID    string `json:"reward_id"`
 }
 
 const KVExLoyaltyRedeem = "stulbe/loyalty/@redeem-rpc"

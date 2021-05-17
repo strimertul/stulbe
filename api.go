@@ -277,9 +277,10 @@ func apiExLoyaltyRedeem(w http.ResponseWriter, r *http.Request) {
 
 	// Send event to hub via database
 	err = db.PutJSON(userNamespace(channel)+api.KVExLoyaltyRedeem, api.ExLoyaltyRedeem{
-		User:     user.Login,
-		Channel:  channel,
-		RewardID: data.RewardID,
+		Username:    user.Login,
+		DisplayName: user.DisplayName,
+		Channel:     channel,
+		RewardID:    data.RewardID,
 	})
 	if err != nil {
 		jsonErr(w, "error sending request to DB: "+err.Error(), http.StatusInternalServerError)
