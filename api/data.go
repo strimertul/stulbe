@@ -31,4 +31,13 @@ type ExLoyaltyRedeem struct {
 	RequestText string `json:"request_text"`
 }
 
+type ExLoyaltyContribute struct {
+	Username    string `json:"username"`
+	DisplayName string `json:"display_name"`
+	Channel     string `json:"channel"`
+	GoalID      string `json:"goal_id"`
+	Amount      int64  `json:"amount"`
+}
+
 const KVExLoyaltyRedeem = "stulbe/loyalty/@redeem-rpc"
+const KVExLoyaltyContribute = "stulbe/loyalty/@contribute-rpc"
