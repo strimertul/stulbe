@@ -148,10 +148,10 @@ func main() {
 	log.Info("helix api access authorized")
 
 	router := mux.NewRouter()
+	router.Use(cors)
 	apiRouter := router.PathPrefix("/api").Subrouter()
 	bindApiRoutes(apiRouter)
-	http.Handle("/", router)
-	http.HandleFunc("/ws", wrapAuth(func(w http.ResponseWriter, r *http.Request) {
+	router.HandleFunc("/ws", wrapAuth(func(w http.ResponseWriter, r *http.Request) {
 		// Get user context
 		claims := r.Context().Value(authKey).(*auth.UserClaims)
 		hub.CreateClient(w, r, kv.ClientOptions{
@@ -161,7 +161,7 @@ func main() {
 	httpLogger = wrapLogger("http")
 	httpLogger.WithField("bind", *bind).Info("starting web server")
 
-	fatalError(http.ListenAndServe(*bind, nil), "HTTP server died unexepectedly")
+	fatalError(http.ListenAndServe(*bind, router), "HTTP server died unexepectedly")
 }
 
 func userNamespace(user string) string {
