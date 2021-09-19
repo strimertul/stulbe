@@ -105,15 +105,8 @@ func authorizeCallback(w http.ResponseWriter, req *http.Request) {
 		jsonErr(w, "failed subscribing to alerts: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	jsonResponse(w, struct {
-		Ok   bool `json:"ok"`
-		User helix.User
-		Cost int
-	}{
-		true,
-		user,
-		cost,
-	})
+	w.Header().Add("Content-Type", "text/html")
+	fmt.Fprintf(w, `<html><body><h2>All done, you can close me now!</h2><script>window.close();</script></body></html>`)
 }
 
 type RefreshResponse struct {
