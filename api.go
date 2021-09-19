@@ -44,6 +44,8 @@ func bindApiRoutes(r *mux.Router) {
 
 	post.HandleFunc("/twitch/authorize", wrapAuth(apiTwitchAuthRedirect))
 	get.HandleFunc("/twitch/user", wrapAuth(apiTwitchUserData))
+	get.HandleFunc("/twitch/list", wrapAuth(apiTwitchListSubscriptions))
+	post.HandleFunc("/twitch/clear", wrapAuth(apiTwitchClearSubscriptions))
 }
 
 func cors(next http.Handler) http.Handler {

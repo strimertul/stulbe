@@ -32,7 +32,8 @@ var appClient *helix.Client
 
 var usercache *lru.Cache
 var channelcache *lru.Cache
-var webhookURL *url.URL
+var webhookURI string
+var webhookSecret string
 
 func wrapLogger(module string) logrus.FieldLogger {
 	return log.WithField("module", module)
@@ -113,9 +114,13 @@ func main() {
 	// Get Twitch credentials from env
 	twitchClientID := os.Getenv("TWITCH_CLIENT_ID")
 	twitchClientSecret := os.Getenv("TWITCH_CLIENT_SECRET")
-
 	if twitchClientID == "" || twitchClientSecret == "" {
 		fatalError(fmt.Errorf("TWITCH_CLIENT_ID and TWITCH_CLIENT_SECRET env vars must be set to a Twitch application credentials"), "Missing configuration")
+	}
+
+	webhookSecret = os.Getenv("TWITCH_WEBHOOK_SECRET")
+	if webhookSecret == "" {
+		fatalError(fmt.Errorf("TWITCH_WEBHOOK_SECRET env var must be set to a random string between 10 and 100 characters"), "Missing configuration")
 	}
 
 	redirectURI := os.Getenv("REDIRECT_URI")
@@ -127,11 +132,11 @@ func main() {
 		fatalError(fmt.Errorf("REDIRECT_URI parsing error: %s)", err), "Invalid configuration")
 	}
 
-	webhookURI := os.Getenv("WEBHOOK_URI")
+	webhookURI = os.Getenv("WEBHOOK_URI")
 	if redirectURI == "" {
 		fatalError(fmt.Errorf("WEBHOOK_URI env var must be set to a valid URL on which the stulbe host is reacheable (eg. https://stulbe.your.tld/webhook"), "Missing configuration")
 	}
-	webhookURL, err = url.Parse(webhookURI)
+	webhookURL, err := url.Parse(webhookURI)
 	if err != nil {
 		fatalError(fmt.Errorf("WEBHOOK_URI parsing error: %s)", err), "Invalid configuration")
 	}
@@ -164,6 +169,7 @@ func main() {
 	apiRouter := router.PathPrefix("/api").Subrouter()
 	bindApiRoutes(apiRouter)
 	router.HandleFunc(redirectURL.Path, authorizeCallback)
+	router.HandleFunc(webhookURL.Path+"/{user}", webhookCallback)
 	router.HandleFunc("/ws", wrapAuth(func(w http.ResponseWriter, r *http.Request) {
 		// Get user context
 		claims := r.Context().Value(authKey).(*auth.UserClaims)

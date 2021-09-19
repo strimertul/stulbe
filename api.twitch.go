@@ -2,9 +2,11 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	jsoniter "github.com/json-iterator/go"
@@ -81,10 +83,35 @@ func authorizeCallback(w http.ResponseWriter, req *http.Request) {
 		jsonErr(w, "error saving auth data for user: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+	// Subscribe to alerts
+	client, err := helix.NewClient(&helix.Options{
+		ClientID:        options.ClientID,
+		ClientSecret:    options.ClientSecret,
+		UserAccessToken: authResp.AccessToken,
+	})
+	if err != nil {
+		jsonErr(w, "failed creating user client: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	users, err := client.GetUsers(&helix.UsersParams{})
+	if err != nil {
+		jsonErr(w, "failed looking up user: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	user := users.Data.Users[0]
+	cost, err := ensureAlertSubscription(user.ID, state)
+	if err != nil {
+		jsonErr(w, "failed subscribing to alerts: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
 	jsonResponse(w, struct {
-		Ok bool `json:"ok"`
+		Ok   bool `json:"ok"`
+		User helix.User
+		Cost int
 	}{
-		Ok: true,
+		true,
+		user,
+		cost,
 	})
 }
 
@@ -118,6 +145,109 @@ func refreshAccessToken(refreshToken string) (r RefreshResponse, err error) {
 	var refreshResp RefreshResponse
 	err = jsoniter.ConfigFastest.NewDecoder(resp.Body).Decode(&refreshResp)
 	return refreshResp, err
+}
+
+var subscriptionVersions = map[string]string{
+	"channel.update":                                         "1",
+	"channel.follow":                                         "1",
+	"channel.subscribe":                                      "1",
+	"channel.cheer":                                          "1",
+	"channel.raid":                                           "1",
+	"channel.poll.begin":                                     "1",
+	"channel.poll.progress":                                  "1",
+	"channel.poll.end":                                       "1",
+	"channel.prediction.begin":                               "1",
+	"channel.prediction.progress":                            "1",
+	"channel.prediction.lock":                                "1",
+	"channel.prediction.end":                                 "1",
+	"channel.hype_train.begin":                               "1",
+	"channel.hype_train.progress":                            "1",
+	"channel.hype_train.end":                                 "1",
+	"channel.channel_points_custom_reward.add":               "1",
+	"channel.channel_points_custom_reward.update":            "1",
+	"channel.channel_points_custom_reward.remove":            "1",
+	"channel.channel_points_custom_reward_redemption.add":    "1",
+	"channel.channel_points_custom_reward_redemption.update": "1",
+	"stream.online":                                          "1",
+	"stream.offline":                                         "1",
+}
+
+func ensureAlertSubscription(id string, state string) (int, error) {
+	//TODO Proper cursor stuff but seriously who has more than 100??
+	subs, err := appClient.GetEventSubSubscriptions(&helix.EventSubSubscriptionsParams{})
+	if err != nil {
+		return -1, err
+	}
+	webhook := fmt.Sprintf("%s/%s", webhookURI, state)
+	subscriptions := map[string]bool{
+		"channel.update":                                         false,
+		"channel.follow":                                         false,
+		"channel.subscribe":                                      false,
+		"channel.cheer":                                          false,
+		"channel.raid":                                           false,
+		"channel.poll.begin":                                     false,
+		"channel.poll.progress":                                  false,
+		"channel.poll.end":                                       false,
+		"channel.prediction.begin":                               false,
+		"channel.prediction.progress":                            false,
+		"channel.prediction.lock":                                false,
+		"channel.prediction.end":                                 false,
+		"channel.hype_train.begin":                               false,
+		"channel.hype_train.progress":                            false,
+		"channel.hype_train.end":                                 false,
+		"channel.channel_points_custom_reward.add":               false,
+		"channel.channel_points_custom_reward.update":            false,
+		"channel.channel_points_custom_reward.remove":            false,
+		"channel.channel_points_custom_reward_redemption.add":    false,
+		"channel.channel_points_custom_reward_redemption.update": false,
+		"stream.online":                                          false,
+		"stream.offline":                                         false,
+	}
+	transport := helix.EventSubTransport{
+		Method:   "webhook",
+		Callback: webhook,
+		Secret:   webhookSecret,
+	}
+	condition := func(topic string, id string) helix.EventSubCondition {
+		switch topic {
+		case "channel.raid":
+			return helix.EventSubCondition{
+				ToBroadcasterUserID: id,
+			}
+		default:
+			return helix.EventSubCondition{
+				BroadcasterUserID: id,
+			}
+		}
+	}
+	for _, sub := range subs.Data.EventSubSubscriptions {
+		// Ignore subscriptions that aren't for this service
+		if sub.Transport.Callback != webhook {
+			continue
+		}
+		subscriptions[sub.Type] = true
+	}
+	cost := 0
+	for topic, subscribed := range subscriptions {
+		if !subscribed {
+			sub, err := appClient.CreateEventSubSubscription(&helix.EventSubSubscription{
+				Type:      topic,
+				Version:   subscriptionVersions[topic],
+				Status:    "enabled",
+				Transport: transport,
+				Condition: condition(topic, id),
+			})
+			if sub.Error != "" || sub.ErrorMessage != "" {
+				log.WithField("err", sub.Error).WithField("errmsg", sub.ErrorMessage).Error("subscription error")
+				return -1, errors.New(sub.Error + ": " + sub.ErrorMessage)
+			}
+			cost = sub.Data.TotalCost
+			if err != nil {
+				return -1, err
+			}
+		}
+	}
+	return cost, nil
 }
 
 func getUserClient(req *http.Request) (*helix.Client, error) {
@@ -171,4 +301,51 @@ func apiTwitchUserData(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	jsonResponse(w, users.Data.Users[0])
+}
+
+func apiTwitchListSubscriptions(w http.ResponseWriter, req *http.Request) {
+	claims := req.Context().Value(authKey).(*auth.UserClaims)
+	if claims.Level != auth.ULAdmin {
+		jsonErr(w, "unauthorized", http.StatusUnauthorized)
+	}
+	subs, err := appClient.GetEventSubSubscriptions(&helix.EventSubSubscriptionsParams{})
+	if err != nil {
+		jsonErr(w, "failed getting subscriptions: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	jsonResponse(w, subs.Data.EventSubSubscriptions)
+}
+
+func apiTwitchClearSubscriptions(w http.ResponseWriter, req *http.Request) {
+	claims := req.Context().Value(authKey).(*auth.UserClaims)
+	if claims.Level != auth.ULAdmin {
+		jsonErr(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	subs, err := appClient.GetEventSubSubscriptions(&helix.EventSubSubscriptionsParams{})
+	if err != nil {
+		jsonErr(w, "failed looking up subscriptions: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	deleted := 0
+	for _, sub := range subs.Data.EventSubSubscriptions {
+		// Ignore subscriptions that aren't for this service
+		if !strings.HasSuffix(sub.Transport.Callback, claims.User) {
+			continue
+		}
+		_, err := appClient.RemoveEventSubSubscription(sub.ID)
+		if err != nil {
+			jsonErr(w, "failed removing subscription: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		deleted++
+	}
+
+	jsonResponse(w, struct {
+		Ok      bool `json:"ok"`
+		Deleted int  `json:"deleted"`
+	}{
+		true,
+		deleted,
+	})
 }
