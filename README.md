@@ -10,15 +10,7 @@ Platform support is limited to Twitch only for the time being (sorry!)
 
 ## Building
 
-You need to build the frontend first!
-
-```sh
-cd frontend
-npm i
-npm run build
-```
-
-Once that's done, just build the app like any other Go project
+Just build the app like any other Go project
 
 ```sh
 go build
