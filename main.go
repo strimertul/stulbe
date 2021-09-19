@@ -166,6 +166,7 @@ func main() {
 
 	router := mux.NewRouter()
 	router.Use(cors)
+	router.Methods("OPTIONS").HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})
 	apiRouter := router.PathPrefix("/api").Subrouter()
 	bindApiRoutes(apiRouter)
 	router.HandleFunc(redirectURL.Path, authorizeCallback)
