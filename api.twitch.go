@@ -12,6 +12,7 @@ import (
 	jsoniter "github.com/json-iterator/go"
 	"github.com/nicklaw5/helix"
 	"github.com/strimertul/stulbe/auth"
+	"github.com/strimertul/stulbe/database"
 )
 
 func apiTwitchAuthRedirect(w http.ResponseWriter, req *http.Request) {
@@ -292,6 +293,10 @@ func getUserClient(req *http.Request) (*helix.Client, error) {
 func apiTwitchUserData(w http.ResponseWriter, req *http.Request) {
 	client, err := getUserClient(req)
 	if err != nil {
+		if err == database.ErrKeyNotFound {
+			jsonErr(w, "twitch user not authenticated", http.StatusFailedDependency)
+			return
+		}
 		jsonErr(w, "failed getting user client: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
