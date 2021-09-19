@@ -3,11 +3,8 @@
 Back-end portion of strimertul for features that require one:
 
 - Streamer "is live" checks
-
-Planned modules include:
-
-- Webhook subscription for alerts
-- Loyalty tracking, APIs for redeems etc
+- Webhook subscription for alerts (WIP!)
+- User-facing loyalty points info (redeem APIs not available yet sorry!)
 
 Platform support is limited to Twitch only for the time being (sorry!)
 
@@ -35,7 +32,7 @@ The entire project is licensed under [AGPL-3.0-only](LICENSE) (see `LICENSE`).
 
 ### How do I use it?
 
-Swagger or whatever docs coming soon, meanwhile look at [this Go client](github.com/strimertul/stulbe-client-go).
+Swagger or whatever docs coming soon, meanwhile look at [this Go client](https://github.com/strimertul/stulbe-client-go).
 
 ### Does this scale?
 
