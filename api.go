@@ -14,11 +14,8 @@ import (
 	jsoniter "github.com/json-iterator/go"
 	"github.com/nicklaw5/helix"
 
-	"github.com/strimertul/strimertul/modules/loyalty"
-
 	"github.com/strimertul/stulbe/api"
 	"github.com/strimertul/stulbe/auth"
-	"github.com/strimertul/stulbe/database"
 )
 
 type APIError struct {
@@ -45,9 +42,8 @@ func bindApiRoutes(r *mux.Router) {
 	get.HandleFunc("/stream/{channelid}/loyalty/goals", apiLoyaltyGoals)
 	get.HandleFunc("/stream/{channelid}/loyalty/info/{uid}", apiLoyaltyUserData)
 
-	// Redeem endpoints (for twitch users)
-	post.HandleFunc("/twitch-ext/reward/redeem", apiExLoyaltyRedeem)
-	post.HandleFunc("/twitch-ext/goal/contribute", apiExLoyaltyContribute)
+	post.HandleFunc("/twitch/authorize", wrapAuth(apiTwitchAuthRedirect))
+	get.HandleFunc("/twitch/user", wrapAuth(apiTwitchUserData))
 }
 
 func cors(next http.Handler) http.Handler {
@@ -127,218 +123,10 @@ func apiAuth(w http.ResponseWriter, r *http.Request) {
 		Token: token,
 	})
 }
-
-func apiLoyaltyConfig(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-
-	channel, err := getChannelByID(vars["channelid"])
-	if err != nil {
-		jsonErr(w, "error fetching channel data: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	configKey := userNamespace(channel) + loyalty.ConfigKey
-
-	data := loyalty.Config{}
-	err = db.GetJSON(configKey, &data)
-	if err != nil && err != database.ErrKeyNotFound {
-		jsonErr(w, "error fetching data: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	jsonResponse(w, struct {
-		Currency string `json:"currency"`
-		Interval int64  `json:"interval"`
-	}{
-		Currency: data.Currency,
-		Interval: data.Points.Interval,
-	})
-}
-
-func apiLoyaltyRewards(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-
-	channel, err := getChannelByID(vars["channelid"])
-	if err != nil {
-		jsonErr(w, "error fetching channel data: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	rewardKey := userNamespace(channel) + loyalty.RewardsKey
-
-	data := loyalty.RewardStorage{}
-	err = db.GetJSON(rewardKey, &data)
-	if err != nil && err != database.ErrKeyNotFound {
-		jsonErr(w, "error fetching data: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	jsonResponse(w, data)
-}
-
-func apiLoyaltyGoals(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-
-	channel, err := getChannelByID(vars["channelid"])
-	if err != nil {
-		jsonErr(w, "error fetching channel data: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	goalKey := userNamespace(channel) + loyalty.GoalsKey
-
-	data := loyalty.GoalStorage{}
-	err = db.GetJSON(goalKey, &data)
-	if err != nil && err != database.ErrKeyNotFound {
-		jsonErr(w, "error fetching data: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	jsonResponse(w, data)
-}
-
-func apiLoyaltyUserData(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-
-	channel, err := getChannelByID(vars["channelid"])
-	if err != nil {
-		jsonErr(w, "error fetching channel data: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	userid := vars["uid"]
-	if !strings.HasPrefix(userid, "U") {
-		jsonErr(w, "invalid user id", http.StatusBadRequest)
-		return
-	}
-	user, err := getUserByID(userid[1:])
-	if err != nil {
-		jsonErr(w, "error fetching username: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	pointsKey := userNamespace(channel) + loyalty.PointsPrefix + user.Login
-	var data loyalty.PointsEntry
-	err = db.GetJSON(pointsKey, &data)
-	if err != nil {
-		if err != database.ErrKeyNotFound {
-			jsonErr(w, "error fetching points: "+err.Error(), http.StatusInternalServerError)
-			return
-		} else {
-			data = loyalty.PointsEntry{Points: 0}
-		}
-	}
-
-	jsonResponse(w, struct {
-		DisplayName string `json:"display_name"`
-		Balance     int64  `json:"balance"`
-	}{
-		DisplayName: user.DisplayName,
-		Balance:     data.Points,
-	})
-}
-
-func apiExLoyaltyRedeem(w http.ResponseWriter, r *http.Request) {
-	// Get user data
-	var data struct {
-		Token       string `json:"token"`
-		RewardID    string `json:"reward_id"`
-		RequestText string `json:"request_text"`
-	}
-	err := jsoniter.ConfigFastest.NewDecoder(r.Body).Decode(&data)
-	if err != nil {
-		jsonErr(w, "error decoding JSON: "+err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	// Parse JWT and extract data from it
-	channel, user, err := parseExtensionToken(data.Token)
-	if err != nil {
-		jsonErr(w, "error decoding request: "+err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	// Send event to hub via database
-	err = db.PutJSON(userNamespace(channel)+api.KVExLoyaltyRedeem, api.ExLoyaltyRedeem{
-		Username:    user.Login,
-		DisplayName: user.DisplayName,
-		Channel:     channel,
-		RewardID:    data.RewardID,
-		RequestText: data.RequestText,
-	})
-	if err != nil {
-		jsonErr(w, "error sending request to DB: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	jsonResponse(w, api.StatusResponse{Ok: true})
-}
-
-func apiExLoyaltyContribute(w http.ResponseWriter, r *http.Request) {
-	// Get user data
-	var data struct {
-		Token  string `json:"token"`
-		GoalID string `json:"goal_id"`
-		Amount int64  `json:"amount"`
-	}
-
-	err := jsoniter.ConfigFastest.NewDecoder(r.Body).Decode(&data)
-	if err != nil {
-		jsonErr(w, "error decoding JSON: "+err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	// Parse JWT and extract data from it
-	channel, user, err := parseExtensionToken(data.Token)
-	if err != nil {
-		jsonErr(w, "error decoding request: "+err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	// Send event to hub via database
-	err = db.PutJSON(userNamespace(channel)+api.KVExLoyaltyContribute, api.ExLoyaltyContribute{
-		Username:    user.Login,
-		DisplayName: user.DisplayName,
-		Channel:     channel,
-		GoalID:      data.GoalID,
-		Amount:      data.Amount,
-	})
-	if err != nil {
-		jsonErr(w, "error sending request to DB: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	jsonResponse(w, api.StatusResponse{Ok: true})
-}
-
-func parseExtensionToken(token string) (string, helix.User, error) {
-	// Parse JWT and extract data from it
-	t, err := jwt.ParseWithClaims(token, jwt.MapClaims{}, func(t *jwt.Token) (interface{}, error) {
-		return twitchExtensionJWT, nil
-	})
-	if err != nil {
-		return "", helix.User{}, fmt.Errorf("error decoding JWT token: %q", err)
-	}
-
-	claims, ok := t.Claims.(jwt.MapClaims)
-	if !ok {
-		return "", helix.User{}, fmt.Errorf("error decoding JWT claims: %q", err)
-	}
-
-	// Get channel/user from IDs
-	channel, err := getChannelByID(claims["channel_id"].(string))
-	if err != nil {
-		return "", helix.User{}, fmt.Errorf("error fetching channel data: %q", err)
-	}
-	user, err := getUserByID(claims["user_id"].(string))
-	if err != nil {
-		return "", helix.User{}, fmt.Errorf("error fetching username: %q", err)
-	}
-
-	return channel, user, nil
-}
-
 func getChannelByID(channelid string) (string, error) {
 	channelName, ok := channelcache.Get(channelid)
 	if !ok {
-		resp, err := client.GetChannelInformation(&helix.GetChannelInformationParams{
+		resp, err := appClient.GetChannelInformation(&helix.GetChannelInformationParams{
 			BroadcasterID: channelid,
 		})
 		if err != nil {
@@ -359,7 +147,7 @@ func getChannelByID(channelid string) (string, error) {
 func getUserByID(userid string) (helix.User, error) {
 	username, ok := usercache.Get(userid)
 	if !ok {
-		resp, err := client.GetUsers(&helix.UsersParams{
+		resp, err := appClient.GetUsers(&helix.UsersParams{
 			IDs: []string{userid},
 		})
 		if err != nil {

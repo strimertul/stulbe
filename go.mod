@@ -9,7 +9,7 @@ require (
 	github.com/hashicorp/golang-lru v0.5.4
 	github.com/json-iterator/go v1.1.11
 	github.com/mattn/go-colorable v0.1.8
-	github.com/nicklaw5/helix v1.15.0
+	github.com/nicklaw5/helix v1.24.2
 	github.com/sirupsen/logrus v1.8.1
 	github.com/strimertul/kilovolt/v4 v4.0.1
 	github.com/strimertul/strimertul v1.3.0

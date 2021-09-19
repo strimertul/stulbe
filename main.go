@@ -1,11 +1,11 @@
 package main
 
 import (
-	"encoding/base64"
 	"errors"
 	"flag"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"runtime"
 	"strings"
@@ -27,11 +27,12 @@ var db *database.DB
 var authStore *auth.Storage
 var log = logrus.New()
 var httpLogger logrus.FieldLogger
-var client *helix.Client
-var twitchExtensionJWT []byte
+var options *helix.Options
+var appClient *helix.Client
 
 var usercache *lru.Cache
 var channelcache *lru.Cache
+var webhookURL *url.URL
 
 func wrapLogger(module string) logrus.FieldLogger {
 	return log.WithField("module", module)
@@ -117,25 +118,36 @@ func main() {
 		fatalError(fmt.Errorf("TWITCH_CLIENT_ID and TWITCH_CLIENT_SECRET env vars must be set to a Twitch application credentials"), "Missing configuration")
 	}
 
-	// Get Twitch extension JWT secret
-	twitchExtensionJWTStr := os.Getenv("TWITCH_EXTENSION_JWT")
-	if twitchExtensionJWTStr == "" {
-		log.Warn("Environment variable TWITCH_EXTENSION_JWT is empty or unset! Incoming requests from twitch panels won't be able to be validated!")
-	} else {
-		twitchExtensionJWT, err = base64.StdEncoding.DecodeString(twitchExtensionJWTStr)
-		failOnError(err, "Could not decode value for TWITCH_EXTENSION_JWT (expected base64)")
+	redirectURI := os.Getenv("REDIRECT_URI")
+	if redirectURI == "" {
+		fatalError(fmt.Errorf("REDIRECT_URI env var must be set to a valid URL on which the stulbe host is reacheable (eg. https://stulbe.your.tld/callback"), "Missing configuration")
+	}
+	redirectURL, err := url.Parse(redirectURI)
+	if err != nil {
+		fatalError(fmt.Errorf("REDIRECT_URI parsing error: %s)", err), "Invalid configuration")
+	}
+
+	webhookURI := os.Getenv("WEBHOOK_URI")
+	if redirectURI == "" {
+		fatalError(fmt.Errorf("WEBHOOK_URI env var must be set to a valid URL on which the stulbe host is reacheable (eg. https://stulbe.your.tld/webhook"), "Missing configuration")
+	}
+	webhookURL, err = url.Parse(webhookURI)
+	if err != nil {
+		fatalError(fmt.Errorf("WEBHOOK_URI parsing error: %s)", err), "Invalid configuration")
 	}
 
 	// Create Twitch client
-	client, err = helix.NewClient(&helix.Options{
+	options = &helix.Options{
 		ClientID:     twitchClientID,
 		ClientSecret: twitchClientSecret,
-	})
+		RedirectURI:  redirectURI,
+	}
+	appClient, err = helix.NewClient(options)
 	if err != nil {
 		fatalError(err, "Failed to initialize Twitch helix client")
 	}
 
-	resp, err := client.RequestAppAccessToken([]string{})
+	resp, err := appClient.RequestAppAccessToken([]string{})
 	if err != nil {
 		fatalError(err, "Failed to get Twitch helix app token")
 	}
@@ -144,13 +156,14 @@ func main() {
 	}
 
 	// Set the access token on the client
-	client.SetAppAccessToken(resp.Data.AccessToken)
+	appClient.SetAppAccessToken(resp.Data.AccessToken)
 	log.Info("helix api access authorized")
 
 	router := mux.NewRouter()
 	router.Use(cors)
 	apiRouter := router.PathPrefix("/api").Subrouter()
 	bindApiRoutes(apiRouter)
+	router.HandleFunc(redirectURL.Path, authorizeCallback)
 	router.HandleFunc("/ws", wrapAuth(func(w http.ResponseWriter, r *http.Request) {
 		// Get user context
 		claims := r.Context().Value(authKey).(*auth.UserClaims)
