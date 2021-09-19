@@ -100,7 +100,7 @@ func authorizeCallback(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	user := users.Data.Users[0]
-	cost, err := ensureAlertSubscription(user.ID, state)
+	_, err = ensureAlertSubscription(user.ID, state)
 	if err != nil {
 		jsonErr(w, "failed subscribing to alerts: "+err.Error(), http.StatusInternalServerError)
 		return
