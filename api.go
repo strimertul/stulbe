@@ -30,8 +30,8 @@ const (
 )
 
 func bindApiRoutes(r *mux.Router) {
-	get := r.Methods("GET").Subrouter()
-	post := r.Methods("POST").Subrouter()
+	get := r.Methods("GET", "OPTIONS").Subrouter()
+	post := r.Methods("POST", "OPTIONS").Subrouter()
 
 	// Auth endpoint (for privileged apps)
 	post.HandleFunc("/auth", apiAuth)

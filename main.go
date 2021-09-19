@@ -165,7 +165,6 @@ func main() {
 	log.Info("helix api access authorized")
 
 	router := mux.NewRouter()
-	router.Use(cors)
 	apiRouter := router.PathPrefix("/api").Subrouter()
 	bindApiRoutes(apiRouter)
 	router.HandleFunc(redirectURL.Path, authorizeCallback)
@@ -177,6 +176,7 @@ func main() {
 			Namespace: userNamespace(claims.User),
 		})
 	}))
+	router.Use(cors)
 	httpLogger = wrapLogger("http")
 	httpLogger.WithField("bind", *bind).Info("starting web server")
 
