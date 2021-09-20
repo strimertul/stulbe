@@ -223,7 +223,15 @@ func ensureAlertSubscription(id string, state string) (int, error) {
 		if sub.Transport.Callback != webhook {
 			continue
 		}
-		subscriptions[sub.Type] = true
+		if sub.Status != "enabled" {
+			// Either revoked or inactive for some reason, remove it so we can make it again
+			_, err := appClient.RemoveEventSubSubscription(sub.ID)
+			if err != nil {
+				log.WithError(err).Error("Failed to remove event subscription")
+			}
+		} else {
+			subscriptions[sub.Type] = true
+		}
 	}
 	cost := 0
 	for topic, subscribed := range subscriptions {
