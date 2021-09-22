@@ -310,6 +310,10 @@ func apiTwitchUserData(w http.ResponseWriter, req *http.Request) {
 		jsonErr(w, "failed looking up user: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+	if (users.Error != "") || (users.ErrorMessage != "") {
+		jsonErr(w, "error looking up user: "+users.Error+": "+users.ErrorMessage, http.StatusInternalServerError)
+		return
+	}
 	jsonResponse(w, users.Data.Users[0])
 }
 
@@ -321,6 +325,10 @@ func apiTwitchListSubscriptions(w http.ResponseWriter, req *http.Request) {
 	subs, err := appClient.GetEventSubSubscriptions(&helix.EventSubSubscriptionsParams{})
 	if err != nil {
 		jsonErr(w, "failed getting subscriptions: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if (subs.Error != "") || (subs.ErrorMessage != "") {
+		jsonErr(w, "error getting subscriptions: "+subs.Error+": "+subs.ErrorMessage, http.StatusInternalServerError)
 		return
 	}
 	jsonResponse(w, subs.Data.EventSubSubscriptions)
