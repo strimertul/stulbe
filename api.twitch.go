@@ -6,7 +6,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 	"time"
 
@@ -275,7 +274,6 @@ func getUserClient(req *http.Request) (*helix.Client, error) {
 		if err != nil {
 			return nil, err
 		}
-		jsoniter.ConfigFastest.NewEncoder(os.Stdout).Encode(refreshed)
 		tokens.AccessToken = refreshed.AccessToken
 		tokens.RefreshToken = refreshed.RefreshToken
 
