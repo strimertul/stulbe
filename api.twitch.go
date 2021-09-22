@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -110,24 +111,21 @@ func authorizeCallback(w http.ResponseWriter, req *http.Request) {
 }
 
 type RefreshResponse struct {
-	AccessToken  string `json:"access_token"`
-	RefreshToken string `json:"refresh_token"`
-	TokenType    string `json:"token_type"`
-	Scope        string `json:"scope"`
+	AccessToken  string   `json:"access_token"`
+	RefreshToken string   `json:"refresh_token"`
+	TokenType    string   `json:"token_type"`
+	Scope        []string `json:"scope"`
 }
 
 func refreshAccessToken(refreshToken string) (r RefreshResponse, err error) {
 	// Exchange code for access/refresh tokens
-	uri, err := url.Parse("https://id.twitch.tv/oauth2/token")
-	if err != nil {
-		return RefreshResponse{}, err
+	query := url.Values{
+		"client_id":     {options.ClientID},
+		"client_secret": {options.ClientSecret},
+		"grant_type":    {"refresh_token"},
+		"refresh_token": {refreshToken},
 	}
-	query := uri.Query()
-	query.Add("client_id", options.ClientID)
-	query.Add("client_secret", options.ClientSecret)
-	query.Add("grant_type", "refresh_token")
-	query.Add("refresh_token", refreshToken)
-	authreq, err := http.NewRequest("POST", uri.String(), nil)
+	authreq, err := http.NewRequest("POST", "https://id.twitch.tv/oauth2/token?"+query.Encode(), nil)
 	if err != nil {
 		return RefreshResponse{}, err
 	}
@@ -277,6 +275,7 @@ func getUserClient(req *http.Request) (*helix.Client, error) {
 		if err != nil {
 			return nil, err
 		}
+		jsoniter.ConfigFastest.NewEncoder(os.Stdout).Encode(refreshed)
 		tokens.AccessToken = refreshed.AccessToken
 		tokens.RefreshToken = refreshed.RefreshToken
 
