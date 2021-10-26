@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io/ioutil"
 	"net/http"
+	"sync"
 
 	"github.com/gorilla/mux"
 	jsoniter "github.com/json-iterator/go"
@@ -17,6 +18,8 @@ type eventSubNotification struct {
 }
 
 const MAX_ARCHIVE = 100
+
+var webhookMutex sync.Mutex
 
 func webhookCallback(w http.ResponseWriter, req *http.Request) {
 	vars := mux.Vars(req)
@@ -44,6 +47,8 @@ func webhookCallback(w http.ResponseWriter, req *http.Request) {
 		w.Write([]byte(vals.Challenge))
 		return
 	}
+	webhookMutex.Lock()
+	defer webhookMutex.Unlock()
 	err = db.PutKey(userNamespace(vars["user"])+"stulbe/ev/webhook", body)
 	if err != nil {
 		log.WithError(err).Error("Could not store event in KV")
