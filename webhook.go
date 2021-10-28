@@ -1,4 +1,4 @@
-package main
+package stulbe
 
 import (
 	"encoding/json"
@@ -21,25 +21,25 @@ const MAX_ARCHIVE = 100
 
 var webhookMutex sync.Mutex
 
-func webhookCallback(w http.ResponseWriter, req *http.Request) {
+func (b *Backend) webhookCallback(w http.ResponseWriter, req *http.Request) {
 	vars := mux.Vars(req)
 
 	body, err := ioutil.ReadAll(req.Body)
 	if err != nil {
-		log.WithError(err).Error("Could not read request body")
+		b.Log.WithError(err).Error("Could not read request body")
 		return
 	}
 	defer req.Body.Close()
 
 	// Verify signature for webhook
-	if !helix.VerifyEventSubNotification(webhookSecret, req.Header, string(body)) {
-		log.Error("Received invalid webhook")
+	if !helix.VerifyEventSubNotification(b.config.WebhookSecret, req.Header, string(body)) {
+		b.Log.Error("Received invalid webhook")
 		return
 	}
 	var vals eventSubNotification
 	err = jsoniter.ConfigFastest.Unmarshal(body, &vals)
 	if err != nil {
-		log.Println(err)
+		b.Log.Println(err)
 		return
 	}
 	// if there's a challenge in the request, respond with only the challenge to verify your eventsub.
@@ -49,12 +49,12 @@ func webhookCallback(w http.ResponseWriter, req *http.Request) {
 	}
 	webhookMutex.Lock()
 	defer webhookMutex.Unlock()
-	err = db.PutKey(userNamespace(vars["user"])+"stulbe/ev/webhook", body)
+	err = b.DB.PutKey(userNamespace(vars["user"])+"stulbe/ev/webhook", body)
 	if err != nil {
-		log.WithError(err).Error("Could not store event in KV")
+		b.Log.WithError(err).Error("Could not store event in KV")
 	}
 	var archive []eventSubNotification
-	err = db.GetJSON(userNamespace(vars["user"])+"stulbe/last-webhooks", &archive)
+	err = b.DB.GetJSON(userNamespace(vars["user"])+"stulbe/last-webhooks", &archive)
 	if err != nil {
 		archive = []eventSubNotification{}
 	}
@@ -62,8 +62,8 @@ func webhookCallback(w http.ResponseWriter, req *http.Request) {
 	if len(archive) > MAX_ARCHIVE {
 		archive = archive[len(archive)-MAX_ARCHIVE:]
 	}
-	err = db.PutJSON(userNamespace(vars["user"])+"stulbe/last-webhooks", archive)
+	err = b.DB.PutJSON(userNamespace(vars["user"])+"stulbe/last-webhooks", archive)
 	if err != nil {
-		log.WithError(err).Error("Could not store archive in KV")
+		b.Log.WithError(err).Error("Could not store archive in KV")
 	}
 }

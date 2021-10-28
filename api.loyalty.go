@@ -1,4 +1,4 @@
-package main
+package stulbe
 
 import (
 	"net/http"
@@ -9,10 +9,10 @@ import (
 	"github.com/strimertul/stulbe/database"
 )
 
-func apiLoyaltyConfig(w http.ResponseWriter, r *http.Request) {
+func (b *Backend) apiLoyaltyConfig(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 
-	channel, err := getChannelByID(vars["channelid"])
+	channel, err := b.GetChannelByID(vars["channelid"])
 	if err != nil {
 		jsonErr(w, "error fetching channel data: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -20,7 +20,7 @@ func apiLoyaltyConfig(w http.ResponseWriter, r *http.Request) {
 	configKey := userNamespace(channel) + loyalty.ConfigKey
 
 	data := loyalty.Config{}
-	err = db.GetJSON(configKey, &data)
+	err = b.DB.GetJSON(configKey, &data)
 	if err != nil && err != database.ErrKeyNotFound {
 		jsonErr(w, "error fetching data: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -35,10 +35,10 @@ func apiLoyaltyConfig(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func apiLoyaltyRewards(w http.ResponseWriter, r *http.Request) {
+func (b *Backend) apiLoyaltyRewards(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 
-	channel, err := getChannelByID(vars["channelid"])
+	channel, err := b.GetChannelByID(vars["channelid"])
 	if err != nil {
 		jsonErr(w, "error fetching channel data: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -46,7 +46,7 @@ func apiLoyaltyRewards(w http.ResponseWriter, r *http.Request) {
 	rewardKey := userNamespace(channel) + loyalty.RewardsKey
 
 	data := loyalty.RewardStorage{}
-	err = db.GetJSON(rewardKey, &data)
+	err = b.DB.GetJSON(rewardKey, &data)
 	if err != nil && err != database.ErrKeyNotFound {
 		jsonErr(w, "error fetching data: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -55,10 +55,10 @@ func apiLoyaltyRewards(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, data)
 }
 
-func apiLoyaltyGoals(w http.ResponseWriter, r *http.Request) {
+func (b *Backend) apiLoyaltyGoals(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 
-	channel, err := getChannelByID(vars["channelid"])
+	channel, err := b.GetChannelByID(vars["channelid"])
 	if err != nil {
 		jsonErr(w, "error fetching channel data: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -66,7 +66,7 @@ func apiLoyaltyGoals(w http.ResponseWriter, r *http.Request) {
 	goalKey := userNamespace(channel) + loyalty.GoalsKey
 
 	data := loyalty.GoalStorage{}
-	err = db.GetJSON(goalKey, &data)
+	err = b.DB.GetJSON(goalKey, &data)
 	if err != nil && err != database.ErrKeyNotFound {
 		jsonErr(w, "error fetching data: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -75,10 +75,10 @@ func apiLoyaltyGoals(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, data)
 }
 
-func apiLoyaltyUserData(w http.ResponseWriter, r *http.Request) {
+func (b *Backend) apiLoyaltyUserData(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 
-	channel, err := getChannelByID(vars["channelid"])
+	channel, err := b.GetChannelByID(vars["channelid"])
 	if err != nil {
 		jsonErr(w, "error fetching channel data: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -89,7 +89,7 @@ func apiLoyaltyUserData(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, "invalid user id", http.StatusBadRequest)
 		return
 	}
-	user, err := getUserByID(userid[1:])
+	user, err := b.GetUserByID(userid[1:])
 	if err != nil {
 		jsonErr(w, "error fetching username: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -97,7 +97,7 @@ func apiLoyaltyUserData(w http.ResponseWriter, r *http.Request) {
 
 	pointsKey := userNamespace(channel) + loyalty.PointsPrefix + user.Login
 	var data loyalty.PointsEntry
-	err = db.GetJSON(pointsKey, &data)
+	err = b.DB.GetJSON(pointsKey, &data)
 	if err != nil {
 		if err != database.ErrKeyNotFound {
 			jsonErr(w, "error fetching points: "+err.Error(), http.StatusInternalServerError)

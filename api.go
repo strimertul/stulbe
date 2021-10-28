@@ -1,4 +1,4 @@
-package main
+package stulbe
 
 import (
 	"context"
@@ -13,6 +13,7 @@ import (
 	"github.com/gorilla/mux"
 	jsoniter "github.com/json-iterator/go"
 	"github.com/nicklaw5/helix"
+	kv "github.com/strimertul/kilovolt/v4"
 
 	"github.com/strimertul/stulbe/api"
 	"github.com/strimertul/stulbe/auth"
@@ -29,26 +30,43 @@ const (
 	authKey contextKey = iota
 )
 
-func bindApiRoutes(r *mux.Router) {
+func (b *Backend) BindRoutes() *mux.Router {
+	router := mux.NewRouter()
+	apiRouter := router.PathPrefix("/api").Subrouter()
+	b.bindApiRoutes(apiRouter)
+	router.HandleFunc(b.redirectURL.Path, b.authorizeCallback)
+	router.HandleFunc(b.webhookURL.Path+"/{user}", b.webhookCallback)
+	router.HandleFunc("/ws", b.wrapAuth(func(w http.ResponseWriter, r *http.Request) {
+		// Get user context
+		claims := r.Context().Value(authKey).(*auth.UserClaims)
+		b.Hub.CreateClient(w, r, kv.ClientOptions{
+			Namespace: userNamespace(claims.User),
+		})
+	}))
+	router.Use(Cors)
+	return router
+}
+
+func (b *Backend) bindApiRoutes(r *mux.Router) {
 	get := r.Methods("GET", "OPTIONS").Subrouter()
 	post := r.Methods("POST", "OPTIONS").Subrouter()
 
 	// Auth endpoint (for privileged apps)
-	post.HandleFunc("/auth", apiAuth)
+	post.HandleFunc("/auth", b.apiAuth)
 
 	// Loyalty endpoints (public)
-	get.HandleFunc("/stream/{channelid}/loyalty/config", apiLoyaltyConfig)
-	get.HandleFunc("/stream/{channelid}/loyalty/rewards", apiLoyaltyRewards)
-	get.HandleFunc("/stream/{channelid}/loyalty/goals", apiLoyaltyGoals)
-	get.HandleFunc("/stream/{channelid}/loyalty/info/{uid}", apiLoyaltyUserData)
+	get.HandleFunc("/stream/{channelid}/loyalty/config", b.apiLoyaltyConfig)
+	get.HandleFunc("/stream/{channelid}/loyalty/rewards", b.apiLoyaltyRewards)
+	get.HandleFunc("/stream/{channelid}/loyalty/goals", b.apiLoyaltyGoals)
+	get.HandleFunc("/stream/{channelid}/loyalty/info/{uid}", b.apiLoyaltyUserData)
 
-	post.HandleFunc("/twitch/authorize", wrapAuth(apiTwitchAuthRedirect))
-	get.HandleFunc("/twitch/user", wrapAuth(apiTwitchUserData))
-	get.HandleFunc("/twitch/list", wrapAuth(apiTwitchListSubscriptions))
-	post.HandleFunc("/twitch/clear", wrapAuth(apiTwitchClearSubscriptions))
+	post.HandleFunc("/twitch/authorize", b.wrapAuth(b.apiTwitchAuthRedirect))
+	get.HandleFunc("/twitch/user", b.wrapAuth(b.apiTwitchUserData))
+	get.HandleFunc("/twitch/list", b.wrapAuth(b.apiTwitchListSubscriptions))
+	post.HandleFunc("/twitch/clear", b.wrapAuth(b.apiTwitchClearSubscriptions))
 }
 
-func cors(next http.Handler) http.Handler {
+func Cors(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT")
@@ -64,7 +82,7 @@ func cors(next http.Handler) http.Handler {
 
 // wrapAuth implements Basic Auth authorization for provided endpoints
 // This is not as secure as it should be but it will probably work ok for now
-func wrapAuth(handler http.HandlerFunc) http.HandlerFunc {
+func (b *Backend) wrapAuth(handler http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Get user credentials
 		header := r.Header.Get("Authorization")
@@ -78,7 +96,7 @@ func wrapAuth(handler http.HandlerFunc) http.HandlerFunc {
 
 		token := parts[1]
 
-		claims, err := authStore.Verify(token)
+		claims, err := b.Auth.Verify(token)
 		if err != nil {
 			switch err {
 			case auth.ErrTokenExpired:
@@ -96,7 +114,7 @@ func wrapAuth(handler http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-func apiAuth(w http.ResponseWriter, r *http.Request) {
+func (b *Backend) apiAuth(w http.ResponseWriter, r *http.Request) {
 	var authPayload api.AuthRequest
 	err := json.NewDecoder(r.Body).Decode(&authPayload)
 	if err != nil {
@@ -104,7 +122,7 @@ func apiAuth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, token, err := authStore.Authenticate(authPayload.User, authPayload.AuthKey, jwt.StandardClaims{
+	user, token, err := b.Auth.Authenticate(authPayload.User, authPayload.AuthKey, jwt.StandardClaims{
 		ExpiresAt: time.Now().Add(time.Hour * 24 * 7).Unix(),
 	})
 
@@ -113,7 +131,7 @@ func apiAuth(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, "invalid credentials", http.StatusUnauthorized)
 			return
 		}
-		httpLogger.WithError(err).Error("internal error while authenticating")
+		b.httpLogger.WithError(err).Error("internal error while authenticating")
 		jsonErr(w, fmt.Sprintf("server error: %s", err.Error()), http.StatusInternalServerError)
 		return
 	}
@@ -125,10 +143,10 @@ func apiAuth(w http.ResponseWriter, r *http.Request) {
 		Token: token,
 	})
 }
-func getChannelByID(channelid string) (string, error) {
-	channelName, ok := channelcache.Get(channelid)
+func (b *Backend) GetChannelByID(channelid string) (string, error) {
+	channelName, ok := b.channelcache.Get(channelid)
 	if !ok {
-		resp, err := appClient.GetChannelInformation(&helix.GetChannelInformationParams{
+		resp, err := b.Client.GetChannelInformation(&helix.GetChannelInformationParams{
 			BroadcasterID: channelid,
 		})
 		if err != nil {
@@ -141,15 +159,15 @@ func getChannelByID(channelid string) (string, error) {
 			return "", errors.New("user id not found")
 		}
 		channelName = strings.ToLower(resp.Data.Channels[0].BroadcasterName)
-		channelcache.Add(channelid, channelName)
+		b.channelcache.Add(channelid, channelName)
 	}
 	return channelName.(string), nil
 }
 
-func getUserByID(userid string) (helix.User, error) {
-	username, ok := usercache.Get(userid)
+func (b *Backend) GetUserByID(userid string) (helix.User, error) {
+	username, ok := b.usercache.Get(userid)
 	if !ok {
-		resp, err := appClient.GetUsers(&helix.UsersParams{
+		resp, err := b.Client.GetUsers(&helix.UsersParams{
 			IDs: []string{userid},
 		})
 		if err != nil {
@@ -162,7 +180,7 @@ func getUserByID(userid string) (helix.User, error) {
 			return helix.User{}, errors.New("user id not found")
 		}
 		username = resp.Data.Users[0]
-		usercache.Add(userid, username)
+		b.usercache.Add(userid, username)
 	}
 	return username.(helix.User), nil
 }

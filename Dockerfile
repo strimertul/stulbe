@@ -5,7 +5,7 @@ WORKDIR /go/src/app
 COPY . .
 
 # Static build required so that we can safely copy the binary over.
-RUN CGO_ENABLED=0 go build -o /go/bin/app -ldflags '-extldflags "-static"' .
+RUN CGO_ENABLED=0 go build -o /go/bin/app -ldflags '-extldflags "-static"' ./cmd/stulbe
 
 FROM alpine:latest as alpine
 

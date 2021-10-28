@@ -1,43 +1,23 @@
 package main
 
 import (
-	"errors"
 	"flag"
 	"fmt"
-	"net/http"
-	"net/url"
 	"os"
 	"runtime"
 	"strings"
 
 	"github.com/dgraph-io/badger/v3"
-	"github.com/gorilla/mux"
-	lru "github.com/hashicorp/golang-lru"
 	"github.com/mattn/go-colorable"
 	"github.com/nicklaw5/helix"
 	"github.com/sirupsen/logrus"
 
-	kv "github.com/strimertul/kilovolt/v4"
-
+	"github.com/strimertul/stulbe"
 	"github.com/strimertul/stulbe/auth"
 	"github.com/strimertul/stulbe/database"
 )
 
-var db *database.DB
-var authStore *auth.Storage
 var log = logrus.New()
-var httpLogger logrus.FieldLogger
-var options *helix.Options
-var appClient *helix.Client
-
-var usercache *lru.Cache
-var channelcache *lru.Cache
-var webhookURI string
-var webhookSecret string
-
-func wrapLogger(module string) logrus.FieldLogger {
-	return log.WithField("module", module)
-}
 
 func parseLogLevel(level string) logrus.Level {
 	switch level {
@@ -73,23 +53,11 @@ func main() {
 	}
 
 	// Open DB
-	var err error
-	db, err = database.Open(badger.DefaultOptions(*dbdir), wrapLogger("db"))
+	db, err := database.Open(badger.DefaultOptions(*dbdir), wrapLogger("db"))
 	failOnError(err, "Could not open DB")
 	defer db.Close()
 
-	// Initialize caches to avoid spamming Twitch's APIs
-	usercache, err = lru.New(128)
-	failOnError(err, "Could not create LRU cache for users")
-	channelcache, err = lru.New(128)
-	failOnError(err, "Could not create LRU cache for channels")
-
-	// Initialize KV (required)
-	hub, err := kv.NewHub(db.Client(), wrapLogger("kv"))
-	failOnError(err, "Could not initialize KV hub")
-	go hub.Run()
-
-	authStore, err = auth.Init(db, auth.Options{
+	authStore, err := auth.Init(db, auth.Options{
 		Logger:              wrapLogger("auth"),
 		ForgeGenerateSecret: *regenerateSecret,
 	})
@@ -118,73 +86,39 @@ func main() {
 		fatalError(fmt.Errorf("TWITCH_CLIENT_ID and TWITCH_CLIENT_SECRET env vars must be set to a Twitch application credentials"), "Missing configuration")
 	}
 
-	webhookSecret = os.Getenv("TWITCH_WEBHOOK_SECRET")
+	webhookSecret := os.Getenv("TWITCH_WEBHOOK_SECRET")
 	if webhookSecret == "" {
 		fatalError(fmt.Errorf("TWITCH_WEBHOOK_SECRET env var must be set to a random string between 10 and 100 characters"), "Missing configuration")
 	}
 
-	redirectURI := os.Getenv("REDIRECT_URI")
-	if redirectURI == "" {
+	redirectURL := os.Getenv("REDIRECT_URI")
+	if redirectURL == "" {
 		fatalError(fmt.Errorf("REDIRECT_URI env var must be set to a valid URL on which the stulbe host is reacheable (eg. https://stulbe.your.tld/callback"), "Missing configuration")
 	}
-	redirectURL, err := url.Parse(redirectURI)
-	if err != nil {
-		fatalError(fmt.Errorf("REDIRECT_URI parsing error: %s)", err), "Invalid configuration")
-	}
 
-	webhookURI = os.Getenv("WEBHOOK_URI")
-	if redirectURI == "" {
+	webhookURL := os.Getenv("WEBHOOK_URI")
+	if webhookURL == "" {
 		fatalError(fmt.Errorf("WEBHOOK_URI env var must be set to a valid URL on which the stulbe host is reacheable (eg. https://stulbe.your.tld/webhook"), "Missing configuration")
-	}
-	webhookURL, err := url.Parse(webhookURI)
-	if err != nil {
-		fatalError(fmt.Errorf("WEBHOOK_URI parsing error: %s)", err), "Invalid configuration")
 	}
 
 	// Create Twitch client
-	options = &helix.Options{
-		ClientID:     twitchClientID,
-		ClientSecret: twitchClientSecret,
-		RedirectURI:  redirectURI,
-	}
-	appClient, err = helix.NewClient(options)
-	if err != nil {
-		fatalError(err, "Failed to initialize Twitch helix client")
-	}
+	backend, err := stulbe.NewBackend(db, authStore, stulbe.BackendConfig{
+		WebhookSecret: webhookSecret,
+		WebhookURL:    webhookURL,
+		RedirectURL:   redirectURL,
+		Twitch: &helix.Options{
+			ClientID:     twitchClientID,
+			ClientSecret: twitchClientSecret,
+			RedirectURI:  redirectURL,
+		},
+	}, log)
+	failOnError(err, "Could not create backend")
 
-	resp, err := appClient.RequestAppAccessToken([]string{})
-	if err != nil {
-		fatalError(err, "Failed to get Twitch helix app token")
-	}
-	if resp.Error != "" {
-		fatalError(errors.New(resp.Error), "Failed to get Twitch helix app token")
-	}
-
-	// Set the access token on the client
-	appClient.SetAppAccessToken(resp.Data.AccessToken)
-	log.Info("helix api access authorized")
-
-	router := mux.NewRouter()
-	apiRouter := router.PathPrefix("/api").Subrouter()
-	bindApiRoutes(apiRouter)
-	router.HandleFunc(redirectURL.Path, authorizeCallback)
-	router.HandleFunc(webhookURL.Path+"/{user}", webhookCallback)
-	router.HandleFunc("/ws", wrapAuth(func(w http.ResponseWriter, r *http.Request) {
-		// Get user context
-		claims := r.Context().Value(authKey).(*auth.UserClaims)
-		hub.CreateClient(w, r, kv.ClientOptions{
-			Namespace: userNamespace(claims.User),
-		})
-	}))
-	router.Use(cors)
-	httpLogger = wrapLogger("http")
-	httpLogger.WithField("bind", *bind).Info("starting web server")
-
-	fatalError(http.ListenAndServe(*bind, router), "HTTP server died unexepectedly")
+	fatalError(backend.RunHTTPServer(*bind), "HTTP server died unexepectedly")
 }
 
-func userNamespace(user string) string {
-	return "@userdata/" + user + "/"
+func wrapLogger(module string) logrus.FieldLogger {
+	return log.WithField("module", module)
 }
 
 func failOnError(err error, text string) {

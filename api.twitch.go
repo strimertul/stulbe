@@ -1,4 +1,4 @@
-package main
+package stulbe
 
 import (
 	"errors"
@@ -15,14 +15,14 @@ import (
 	"github.com/strimertul/stulbe/database"
 )
 
-func apiTwitchAuthRedirect(w http.ResponseWriter, req *http.Request) {
+func (b Backend) apiTwitchAuthRedirect(w http.ResponseWriter, req *http.Request) {
 	// Get user context
 	claims, ok := req.Context().Value(authKey).(*auth.UserClaims)
 	if !ok {
 		jsonErr(w, "authorization required", http.StatusUnauthorized)
 	}
 
-	uri := appClient.GetAuthorizationURL(&helix.AuthorizationURLParams{
+	uri := b.Client.GetAuthorizationURL(&helix.AuthorizationURLParams{
 		ResponseType: "code",
 		State:        claims.User,
 		Scopes:       []string{"bits:read channel:read:subscriptions channel:read:redemptions channel:read:polls channel:read:predictions channel:read:hype_train"},
@@ -45,7 +45,7 @@ type AuthResponse struct {
 
 const authKeysPrefix = "@twitch-auth/"
 
-func authorizeCallback(w http.ResponseWriter, req *http.Request) {
+func (b *Backend) authorizeCallback(w http.ResponseWriter, req *http.Request) {
 	// Get code from params
 	code := req.URL.Query().Get("code")
 	if code == "" {
@@ -55,11 +55,11 @@ func authorizeCallback(w http.ResponseWriter, req *http.Request) {
 	state := req.URL.Query().Get("state")
 	// Exchange code for access/refresh tokens
 	query := url.Values{
-		"client_id":     {options.ClientID},
-		"client_secret": {options.ClientSecret},
+		"client_id":     {b.config.Twitch.ClientID},
+		"client_secret": {b.config.Twitch.ClientSecret},
 		"grant_type":    {"authorization_code"},
 		"code":          {code},
-		"redirect_uri":  {options.RedirectURI},
+		"redirect_uri":  {b.config.Twitch.RedirectURI},
 	}
 	authreq, err := http.NewRequest("POST", "https://id.twitch.tv/oauth2/token?"+query.Encode(), nil)
 	if err != nil {
@@ -79,15 +79,15 @@ func authorizeCallback(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	authResp.Time = time.Now()
-	err = db.PutJSON(authKeysPrefix+state, authResp)
+	err = b.DB.PutJSON(authKeysPrefix+state, authResp)
 	if err != nil {
 		jsonErr(w, "error saving auth data for user: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 	// Subscribe to alerts
 	client, err := helix.NewClient(&helix.Options{
-		ClientID:        options.ClientID,
-		ClientSecret:    options.ClientSecret,
+		ClientID:        b.config.Twitch.ClientID,
+		ClientSecret:    b.config.Twitch.ClientSecret,
 		UserAccessToken: authResp.AccessToken,
 	})
 	if err != nil {
@@ -100,7 +100,7 @@ func authorizeCallback(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	user := users.Data.Users[0]
-	_, err = ensureAlertSubscription(user.ID, state)
+	_, err = b.ensureAlertSubscription(user.ID, state)
 	if err != nil {
 		jsonErr(w, "failed subscribing to alerts: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -116,11 +116,11 @@ type RefreshResponse struct {
 	Scope        []string `json:"scope"`
 }
 
-func refreshAccessToken(refreshToken string) (r RefreshResponse, err error) {
+func (b *Backend) refreshAccessToken(refreshToken string) (r RefreshResponse, err error) {
 	// Exchange code for access/refresh tokens
 	query := url.Values{
-		"client_id":     {options.ClientID},
-		"client_secret": {options.ClientSecret},
+		"client_id":     {b.config.Twitch.ClientID},
+		"client_secret": {b.config.Twitch.ClientSecret},
 		"grant_type":    {"refresh_token"},
 		"refresh_token": {refreshToken},
 	}
@@ -165,13 +165,13 @@ var subscriptionVersions = map[string]string{
 	"stream.offline":                                         "1",
 }
 
-func ensureAlertSubscription(id string, state string) (int, error) {
+func (b *Backend) ensureAlertSubscription(id string, state string) (int, error) {
 	//TODO Proper cursor stuff but seriously who has more than 100??
-	subs, err := appClient.GetEventSubSubscriptions(&helix.EventSubSubscriptionsParams{})
+	subs, err := b.Client.GetEventSubSubscriptions(&helix.EventSubSubscriptionsParams{})
 	if err != nil {
 		return -1, err
 	}
-	webhook := fmt.Sprintf("%s/%s", webhookURI, state)
+	webhook := fmt.Sprintf("%s/%s", b.config.WebhookURL, state)
 	subscriptions := map[string]bool{
 		"channel.update":                                         false,
 		"channel.follow":                                         false,
@@ -201,7 +201,7 @@ func ensureAlertSubscription(id string, state string) (int, error) {
 	transport := helix.EventSubTransport{
 		Method:   "webhook",
 		Callback: webhook,
-		Secret:   webhookSecret,
+		Secret:   b.config.WebhookSecret,
 	}
 	condition := func(topic string, id string) helix.EventSubCondition {
 		switch topic {
@@ -222,9 +222,9 @@ func ensureAlertSubscription(id string, state string) (int, error) {
 		}
 		if sub.Status != "enabled" {
 			// Either revoked or inactive for some reason, remove it so we can make it again
-			_, err := appClient.RemoveEventSubSubscription(sub.ID)
+			_, err := b.Client.RemoveEventSubSubscription(sub.ID)
 			if err != nil {
-				log.WithError(err).Error("Failed to remove event subscription")
+				b.Log.WithError(err).Error("Failed to remove event subscription")
 			}
 		} else {
 			subscriptions[sub.Type] = true
@@ -233,7 +233,7 @@ func ensureAlertSubscription(id string, state string) (int, error) {
 	cost := 0
 	for topic, subscribed := range subscriptions {
 		if !subscribed {
-			sub, err := appClient.CreateEventSubSubscription(&helix.EventSubSubscription{
+			sub, err := b.Client.CreateEventSubSubscription(&helix.EventSubSubscription{
 				Type:      topic,
 				Version:   subscriptionVersions[topic],
 				Status:    "enabled",
@@ -241,7 +241,7 @@ func ensureAlertSubscription(id string, state string) (int, error) {
 				Condition: condition(topic, id),
 			})
 			if sub.Error != "" || sub.ErrorMessage != "" {
-				log.WithField("err", sub.Error).WithField("errmsg", sub.ErrorMessage).Error("subscription error")
+				b.Log.WithField("err", sub.Error).WithField("errmsg", sub.ErrorMessage).Error("subscription error")
 				return -1, errors.New(sub.Error + ": " + sub.ErrorMessage)
 			}
 			cost = sub.Data.TotalCost
@@ -253,7 +253,7 @@ func ensureAlertSubscription(id string, state string) (int, error) {
 	return cost, nil
 }
 
-func getUserClient(req *http.Request) (*helix.Client, error) {
+func (b *Backend) getUserClient(req *http.Request) (*helix.Client, error) {
 	// Get user context
 	claims, ok := req.Context().Value(authKey).(*auth.UserClaims)
 	if !ok {
@@ -262,7 +262,7 @@ func getUserClient(req *http.Request) (*helix.Client, error) {
 
 	// Get user's access token
 	var tokens AuthResponse
-	err := db.GetJSON(authKeysPrefix+claims.User, &tokens)
+	err := b.DB.GetJSON(authKeysPrefix+claims.User, &tokens)
 	if err != nil {
 		return nil, err
 	}
@@ -270,7 +270,7 @@ func getUserClient(req *http.Request) (*helix.Client, error) {
 	// Handle token expiration
 	if time.Now().After(tokens.Time.Add(time.Duration(tokens.ExpiresIn) * time.Second)) {
 		// Refresh tokens
-		refreshed, err := refreshAccessToken(tokens.RefreshToken)
+		refreshed, err := b.refreshAccessToken(tokens.RefreshToken)
 		if err != nil {
 			return nil, err
 		}
@@ -278,7 +278,7 @@ func getUserClient(req *http.Request) (*helix.Client, error) {
 		tokens.RefreshToken = refreshed.RefreshToken
 
 		// Save new token pair
-		err = db.PutJSON(authKeysPrefix+claims.User, tokens)
+		err = b.DB.PutJSON(authKeysPrefix+claims.User, tokens)
 		if err != nil {
 			return nil, err
 		}
@@ -286,14 +286,14 @@ func getUserClient(req *http.Request) (*helix.Client, error) {
 
 	// Create user-specific client
 	return helix.NewClient(&helix.Options{
-		ClientID:        options.ClientID,
-		ClientSecret:    options.ClientSecret,
+		ClientID:        b.config.Twitch.ClientID,
+		ClientSecret:    b.config.Twitch.ClientSecret,
 		UserAccessToken: tokens.AccessToken,
 	})
 }
 
-func apiTwitchUserData(w http.ResponseWriter, req *http.Request) {
-	client, err := getUserClient(req)
+func (b *Backend) apiTwitchUserData(w http.ResponseWriter, req *http.Request) {
+	client, err := b.getUserClient(req)
 	if err != nil {
 		if err == database.ErrKeyNotFound {
 			jsonErr(w, "twitch user not authenticated", http.StatusFailedDependency)
@@ -314,12 +314,12 @@ func apiTwitchUserData(w http.ResponseWriter, req *http.Request) {
 	jsonResponse(w, users.Data.Users[0])
 }
 
-func apiTwitchListSubscriptions(w http.ResponseWriter, req *http.Request) {
+func (b *Backend) apiTwitchListSubscriptions(w http.ResponseWriter, req *http.Request) {
 	claims := req.Context().Value(authKey).(*auth.UserClaims)
 	if claims.Level != auth.ULAdmin {
 		jsonErr(w, "unauthorized", http.StatusUnauthorized)
 	}
-	subs, err := appClient.GetEventSubSubscriptions(&helix.EventSubSubscriptionsParams{})
+	subs, err := b.Client.GetEventSubSubscriptions(&helix.EventSubSubscriptionsParams{})
 	if err != nil {
 		jsonErr(w, "failed getting subscriptions: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -331,13 +331,13 @@ func apiTwitchListSubscriptions(w http.ResponseWriter, req *http.Request) {
 	jsonResponse(w, subs.Data.EventSubSubscriptions)
 }
 
-func apiTwitchClearSubscriptions(w http.ResponseWriter, req *http.Request) {
+func (b *Backend) apiTwitchClearSubscriptions(w http.ResponseWriter, req *http.Request) {
 	claims := req.Context().Value(authKey).(*auth.UserClaims)
 	if claims.Level != auth.ULAdmin {
 		jsonErr(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	subs, err := appClient.GetEventSubSubscriptions(&helix.EventSubSubscriptionsParams{})
+	subs, err := b.Client.GetEventSubSubscriptions(&helix.EventSubSubscriptionsParams{})
 	if err != nil {
 		jsonErr(w, "failed looking up subscriptions: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -348,7 +348,7 @@ func apiTwitchClearSubscriptions(w http.ResponseWriter, req *http.Request) {
 		if !strings.HasSuffix(sub.Transport.Callback, claims.User) {
 			continue
 		}
-		_, err := appClient.RemoveEventSubSubscription(sub.ID)
+		_, err := b.Client.RemoveEventSubSubscription(sub.ID)
 		if err != nil {
 			jsonErr(w, "failed removing subscription: "+err.Error(), http.StatusInternalServerError)
 			return
