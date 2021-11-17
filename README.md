@@ -4,7 +4,7 @@ Back-end portion of strimertul for features that require one:
 
 - KV sync for remote applications
 - User-facing loyalty points info (redeem APIs not available yet sorry!)
-- Webhook subscription for alerts (WIP!)
+- Webhook subscription for alerts
 
 Platform support is limited to Twitch only for the time being (sorry!)
 
