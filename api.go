@@ -13,7 +13,7 @@ import (
 	"github.com/gorilla/mux"
 	jsoniter "github.com/json-iterator/go"
 	"github.com/nicklaw5/helix"
-	kv "github.com/strimertul/kilovolt/v4"
+	kv "github.com/strimertul/kilovolt/v6"
 
 	"github.com/strimertul/stulbe/api"
 	"github.com/strimertul/stulbe/auth"

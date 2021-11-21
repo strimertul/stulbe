@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"net/url"
 
-	kv "github.com/strimertul/kilovolt/v4"
+	kv "github.com/strimertul/kilovolt/v6"
 	"github.com/strimertul/stulbe/auth"
 	"github.com/strimertul/stulbe/database"
 
@@ -81,7 +81,7 @@ func NewBackend(db *database.DB, authStore *auth.Storage, config BackendConfig, 
 	log.Info("helix api access authorized")
 
 	// Initialize KV (required)
-	hub, err := kv.NewHub(db.Client(), wrapLogger(log, "kv"))
+	hub, err := kv.NewHub(db.Client(), kv.HubOptions{}, wrapLogger(log, "kv"))
 	if err != nil {
 		return nil, fmt.Errorf("could not initialize KV hub: %w", err)
 	}

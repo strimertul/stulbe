@@ -11,7 +11,7 @@ require (
 	github.com/mattn/go-colorable v0.1.8
 	github.com/nicklaw5/helix v1.24.2
 	github.com/sirupsen/logrus v1.8.1
-	github.com/strimertul/kilovolt/v4 v4.0.1
+	github.com/strimertul/kilovolt/v6 v6.0.0
 	github.com/strimertul/strimertul v1.3.0
 	golang.org/x/crypto v0.0.0-20210505212654-3497b51f5e64
 )
