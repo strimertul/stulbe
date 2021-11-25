@@ -8,13 +8,37 @@ Back-end portion of strimertul for features that require one:
 
 Platform support is limited to Twitch only for the time being (sorry!)
 
-## Building
+## Getting started
 
-Just build the app like any other Go project
+### Docker image
+
+A prebuilt docker image is available in Docker Hub at [strimertul/stulbe](https://hub.docker.com/r/strimertul/stulbe).
+
+### Pre-build binaries
+
+You can find pre-build binaries for Windows and Linux in our [Release section](https://github.com/strimertul/stulbe/releases/latest).
+
+### Building manually
+
+You can build the app like any other Go project:
 
 ```sh
 go build
 ```
+
+### Starting stulbe
+
+To start stulbe succesfully you will have to configure the following environment variables:
+
+```env
+TWITCH_CLIENT_ID=Twitch client ID
+TWITCH_CLIENT_SECRET=Twitch client secret
+TWITCH_WEBHOOK_SECRET=some random secret string
+REDIRECT_URI=https://redirect.uri.for.auth/oauth
+WEBHOOK_URI=https://webhook.uri.for.twitch.alerts/webhook
+```
+
+To obtain the Twitch client credentials, [create an Application in the Twitch dev console](https://dev.twitch.tv/console/apps/create), make sure to set the REDIRECT_URI to a reacheable URL and to make sure it's in the "OAuth Redirect URLs" section of the application!
 
 ## License
 
@@ -34,7 +58,7 @@ lol no it uses a single-writer on-disk KV store
 
 The aim of the strimertul suite is to be lean and hackable. Making a distributed cloud-native _\<more devop buzzwords here>_ thingamajig is way out of scope.
 
-If you have enough load you should consider going for Twitch Partner or making your own system (or fork us and make a stulbe-at-scale, FOSS for the win!)
+I don't know realistically how much load this system can take, but I highly suggest looking elsewhere if you think your scale could be an issue. If you made/know a FOSS tool like this that scales, let me know!
 
 ### Where's the API docs?
 
