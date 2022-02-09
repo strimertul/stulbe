@@ -9,11 +9,13 @@ import (
 	"strings"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/dgrijalva/jwt-go"
 	"github.com/gorilla/mux"
 	jsoniter "github.com/json-iterator/go"
-	"github.com/nicklaw5/helix"
-	kv "github.com/strimertul/kilovolt/v6"
+	"github.com/nicklaw5/helix/v2"
+	kv "github.com/strimertul/kilovolt/v8"
 
 	"github.com/strimertul/stulbe/api"
 	"github.com/strimertul/stulbe/auth"
@@ -39,7 +41,7 @@ func (b *Backend) BindRoutes() *mux.Router {
 	router.HandleFunc("/ws", b.wrapAuth(func(w http.ResponseWriter, r *http.Request) {
 		// Get user context
 		claims := r.Context().Value(authKey).(*auth.UserClaims)
-		b.Hub.CreateClient(w, r, kv.ClientOptions{
+		b.Hub.CreateWebsocketClient(w, r, kv.ClientOptions{
 			Namespace: userNamespace(claims.User),
 		})
 	}))
@@ -131,7 +133,7 @@ func (b *Backend) apiAuth(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, "invalid credentials", http.StatusUnauthorized)
 			return
 		}
-		b.httpLogger.WithError(err).Error("internal error while authenticating")
+		b.httpLogger.Error("internal error while authenticating", zap.Error(err))
 		jsonErr(w, fmt.Sprintf("server error: %s", err.Error()), http.StatusInternalServerError)
 		return
 	}

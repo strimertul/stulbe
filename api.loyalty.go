@@ -5,9 +5,56 @@ import (
 	"strings"
 
 	"github.com/gorilla/mux"
-	"github.com/strimertul/strimertul/modules/loyalty"
 	"github.com/strimertul/stulbe/database"
 )
+
+const loyaltyConfigKey = "loyalty/config"
+
+const loyaltyRewardsKey = "loyalty/rewards"
+
+type loyaltyRewardStorage []loyaltyReward
+
+const loyaltyGoalsKey = "loyalty/goals"
+
+type loyaltyGoalStorage []loyaltyGoal
+
+type loyaltyReward struct {
+	Enabled       bool   `json:"enabled"`
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	Description   string `json:"description"`
+	Image         string `json:"image"`
+	Price         int64  `json:"price"`
+	CustomRequest string `json:"required_info,omitempty"`
+	Cooldown      int64  `json:"cooldown"`
+}
+
+type loyaltyGoal struct {
+	Enabled      bool             `json:"enabled"`
+	ID           string           `json:"id"`
+	Name         string           `json:"name"`
+	Description  string           `json:"description"`
+	Image        string           `json:"image"`
+	TotalGoal    int64            `json:"total"`
+	Contributed  int64            `json:"contributed"`
+	Contributors map[string]int64 `json:"contributors"`
+}
+
+const loyaltyPointsPrefix = "loyalty/points/"
+
+type loyaltyPointsEntry struct {
+	Points int64 `json:"points"`
+}
+
+// Subset of the actual Loyalty config
+type loyaltyConfig struct {
+	Currency string `json:"currency"`
+	Points   struct {
+		Interval      int64 `json:"interval"` // in seconds!
+		Amount        int64 `json:"amount"`
+		ActivityBonus int64 `json:"activity_bonus"`
+	} `json:"points"`
+}
 
 func (b *Backend) apiLoyaltyConfig(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
@@ -17,9 +64,9 @@ func (b *Backend) apiLoyaltyConfig(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, "error fetching channel data: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	configKey := userNamespace(channel) + loyalty.ConfigKey
+	configKey := userNamespace(channel) + loyaltyConfigKey
 
-	data := loyalty.Config{}
+	data := loyaltyConfig{}
 	err = b.DB.GetJSON(configKey, &data)
 	if err != nil && err != database.ErrKeyNotFound {
 		jsonErr(w, "error fetching data: "+err.Error(), http.StatusInternalServerError)
@@ -43,9 +90,9 @@ func (b *Backend) apiLoyaltyRewards(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, "error fetching channel data: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	rewardKey := userNamespace(channel) + loyalty.RewardsKey
+	rewardKey := userNamespace(channel) + loyaltyRewardsKey
 
-	data := loyalty.RewardStorage{}
+	data := loyaltyRewardStorage{}
 	err = b.DB.GetJSON(rewardKey, &data)
 	if err != nil && err != database.ErrKeyNotFound {
 		jsonErr(w, "error fetching data: "+err.Error(), http.StatusInternalServerError)
@@ -63,9 +110,9 @@ func (b *Backend) apiLoyaltyGoals(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, "error fetching channel data: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	goalKey := userNamespace(channel) + loyalty.GoalsKey
+	goalKey := userNamespace(channel) + loyaltyGoalsKey
 
-	data := loyalty.GoalStorage{}
+	data := loyaltyGoalStorage{}
 	err = b.DB.GetJSON(goalKey, &data)
 	if err != nil && err != database.ErrKeyNotFound {
 		jsonErr(w, "error fetching data: "+err.Error(), http.StatusInternalServerError)
@@ -95,15 +142,15 @@ func (b *Backend) apiLoyaltyUserData(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	pointsKey := userNamespace(channel) + loyalty.PointsPrefix + user.Login
-	var data loyalty.PointsEntry
+	pointsKey := userNamespace(channel) + loyaltyPointsPrefix + user.Login
+	var data loyaltyPointsEntry
 	err = b.DB.GetJSON(pointsKey, &data)
 	if err != nil {
 		if err != database.ErrKeyNotFound {
 			jsonErr(w, "error fetching points: "+err.Error(), http.StatusInternalServerError)
 			return
 		} else {
-			data = loyalty.PointsEntry{Points: 0}
+			data = loyaltyPointsEntry{Points: 0}
 		}
 	}
 

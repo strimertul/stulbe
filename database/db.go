@@ -3,9 +3,11 @@ package database
 import (
 	"context"
 
+	"github.com/dgraph-io/badger/v3/pb"
+
 	"github.com/dgraph-io/badger/v3"
 	jsoniter "github.com/json-iterator/go"
-	"github.com/sirupsen/logrus"
+	"go.uber.org/zap"
 )
 
 var json = jsoniter.ConfigFastest
@@ -16,7 +18,7 @@ var (
 
 type DB struct {
 	client *badger.DB
-	logger logrus.FieldLogger
+	logger *zap.Logger
 }
 
 type ModifiedKV struct {
@@ -27,8 +29,7 @@ type ModifiedKV struct {
 	Expires uint64
 }
 
-func Open(options badger.Options, logger logrus.FieldLogger) (*DB, error) {
-	options.Logger = logger
+func Open(options badger.Options, logger *zap.Logger) (*DB, error) {
 	client, err := badger.Open(options)
 
 	return &DB{
@@ -65,9 +66,9 @@ func (db *DB) PutKey(key string, data []byte) error {
 }
 
 func (db *DB) Subscribe(ctx context.Context, fn func(changed []ModifiedKV) error, prefixes ...string) error {
-	prefixList := make([][]byte, len(prefixes))
+	prefixList := make([]pb.Match, len(prefixes))
 	for index, prefix := range prefixes {
-		prefixList[index] = []byte(prefix)
+		prefixList[index] = pb.Match{Prefix: []byte(prefix)}
 	}
 	return db.client.Subscribe(ctx, func(kv *badger.KVList) error {
 		modified := make([]ModifiedKV, len(kv.Kv))
@@ -81,7 +82,7 @@ func (db *DB) Subscribe(ctx context.Context, fn func(changed []ModifiedKV) error
 			}
 		}
 		return fn(modified)
-	}, prefixList...)
+	}, prefixList)
 }
 
 func (db *DB) GetJSON(key string, dst interface{}) error {

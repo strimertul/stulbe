@@ -9,8 +9,11 @@ import (
 	"strings"
 	"time"
 
+	"go.uber.org/zap"
+
 	jsoniter "github.com/json-iterator/go"
-	"github.com/nicklaw5/helix"
+	"github.com/nicklaw5/helix/v2"
+
 	"github.com/strimertul/stulbe/auth"
 	"github.com/strimertul/stulbe/database"
 )
@@ -224,7 +227,7 @@ func (b *Backend) ensureAlertSubscription(id string, state string) (int, error) 
 			// Either revoked or inactive for some reason, remove it so we can make it again
 			_, err := b.Client.RemoveEventSubSubscription(sub.ID)
 			if err != nil {
-				b.Log.WithError(err).Error("Failed to remove event subscription")
+				b.Log.Error("Failed to remove event subscription", zap.Error(err))
 			}
 		} else {
 			subscriptions[sub.Type] = true
@@ -241,7 +244,7 @@ func (b *Backend) ensureAlertSubscription(id string, state string) (int, error) 
 				Condition: condition(topic, id),
 			})
 			if sub.Error != "" || sub.ErrorMessage != "" {
-				b.Log.WithField("err", sub.Error).WithField("errmsg", sub.ErrorMessage).Error("subscription error")
+				b.Log.Error("subscription error", zap.String("err", sub.Error), zap.String("message", sub.ErrorMessage))
 				return -1, errors.New(sub.Error + ": " + sub.ErrorMessage)
 			}
 			cost = sub.Data.TotalCost

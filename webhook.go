@@ -6,9 +6,11 @@ import (
 	"net/http"
 	"sync"
 
+	"go.uber.org/zap"
+
 	"github.com/gorilla/mux"
 	jsoniter "github.com/json-iterator/go"
-	"github.com/nicklaw5/helix"
+	"github.com/nicklaw5/helix/v2"
 )
 
 type eventSubNotification struct {
@@ -26,7 +28,7 @@ func (b *Backend) webhookCallback(w http.ResponseWriter, req *http.Request) {
 
 	body, err := ioutil.ReadAll(req.Body)
 	if err != nil {
-		b.Log.WithError(err).Error("Could not read request body")
+		b.Log.Error("Could not read request body", zap.Error(err))
 		return
 	}
 	defer req.Body.Close()
@@ -39,7 +41,7 @@ func (b *Backend) webhookCallback(w http.ResponseWriter, req *http.Request) {
 	var vals eventSubNotification
 	err = jsoniter.ConfigFastest.Unmarshal(body, &vals)
 	if err != nil {
-		b.Log.Println(err)
+		b.Log.Error("cannot decode event", zap.Error(err))
 		return
 	}
 	// if there's a challenge in the request, respond with only the challenge to verify your eventsub.
@@ -51,7 +53,7 @@ func (b *Backend) webhookCallback(w http.ResponseWriter, req *http.Request) {
 	defer webhookMutex.Unlock()
 	err = b.DB.PutKey(userNamespace(vars["user"])+"stulbe/ev/webhook", body)
 	if err != nil {
-		b.Log.WithError(err).Error("Could not store event in KV")
+		b.Log.Error("Could not store event in KV", zap.Error(err))
 	}
 	var archive []eventSubNotification
 	err = b.DB.GetJSON(userNamespace(vars["user"])+"stulbe/last-webhooks", &archive)
@@ -64,6 +66,6 @@ func (b *Backend) webhookCallback(w http.ResponseWriter, req *http.Request) {
 	}
 	err = b.DB.PutJSON(userNamespace(vars["user"])+"stulbe/last-webhooks", archive)
 	if err != nil {
-		b.Log.WithError(err).Error("Could not store archive in KV")
+		b.Log.Error("Could not store archive in KV", zap.Error(err))
 	}
 }

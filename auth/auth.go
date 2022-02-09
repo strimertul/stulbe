@@ -4,7 +4,8 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 
-	"github.com/sirupsen/logrus"
+	"go.uber.org/zap"
+
 	"github.com/strimertul/stulbe/database"
 )
 
@@ -12,11 +13,11 @@ type Storage struct {
 	db        *database.DB
 	users     UserList
 	secretKey []byte
-	logger    logrus.FieldLogger
+	logger    *zap.Logger
 }
 
 type Options struct {
-	Logger              logrus.FieldLogger
+	Logger              *zap.Logger
 	ForgeGenerateSecret bool
 }
 
@@ -75,6 +76,6 @@ func (db *Storage) generateSecret() error {
 	if err != nil {
 		return err
 	}
-	db.logger.WithField("key", hex.EncodeToString(db.secretKey)).Info("generated secret key")
+	db.logger.Info("generated secret key", zap.String("key", hex.EncodeToString(db.secretKey)))
 	return nil
 }

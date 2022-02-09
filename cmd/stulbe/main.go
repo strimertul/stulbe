@@ -4,61 +4,44 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"runtime"
 	"strings"
 
 	"github.com/dgraph-io/badger/v3"
-	"github.com/mattn/go-colorable"
-	"github.com/nicklaw5/helix"
-	"github.com/sirupsen/logrus"
+	"github.com/nicklaw5/helix/v2"
+	"go.uber.org/zap"
 
 	"github.com/strimertul/stulbe"
 	"github.com/strimertul/stulbe/auth"
 	"github.com/strimertul/stulbe/database"
 )
 
-var log = logrus.New()
-
-func parseLogLevel(level string) logrus.Level {
-	switch level {
-	case "error":
-		return logrus.ErrorLevel
-	case "warn", "warning":
-		return logrus.WarnLevel
-	case "info", "notice":
-		return logrus.InfoLevel
-	case "debug":
-		return logrus.DebugLevel
-	case "trace":
-		return logrus.TraceLevel
-	default:
-		return logrus.InfoLevel
-	}
-}
+var log *zap.Logger
 
 func main() {
 	bind := flag.String("bind", ":9999", "Bind addr in format address:port")
 	dbdir := flag.String("dbfile", "data", "Filename for database")
-	loglevel := flag.String("loglevel", "info", "Logging level (debug, info, warn, error)")
+	debug := flag.Bool("debug", false, "Enable debug logging")
 	bootstrap := flag.String("bootstrap", "", "Create admin user with given credentials (user:token)")
 	regenerateSecret := flag.Bool("regen-secret", false, "Force secret key generation, this will invalidate all previous session!")
 	flag.Parse()
 
-	log.SetLevel(parseLogLevel(*loglevel))
-
-	// Ok this is dumb but listen, I like colors.
-	if runtime.GOOS == "windows" {
-		log.SetFormatter(&logrus.TextFormatter{ForceColors: true})
-		log.SetOutput(colorable.NewColorableStdout())
+	if *debug {
+		var err error
+		log, err = zap.NewDevelopment()
+		failOnError(err, "Failed to create logger")
+	} else {
+		var err error
+		log, err = zap.NewProduction()
+		failOnError(err, "Failed to create logger")
 	}
 
 	// Open DB
-	db, err := database.Open(badger.DefaultOptions(*dbdir), wrapLogger("db"))
+	db, err := database.Open(badger.DefaultOptions(*dbdir).WithSyncWrites(true), log.With(zap.String("module", "db")))
 	failOnError(err, "Could not open DB")
 	defer db.Close()
 
 	authStore, err := auth.Init(db, auth.Options{
-		Logger:              wrapLogger("auth"),
+		Logger:              log.With(zap.String("module", "auth")),
 		ForgeGenerateSecret: *regenerateSecret,
 	})
 	failOnError(err, "Could not initialize auth store")
@@ -66,13 +49,13 @@ func main() {
 	if *bootstrap != "" {
 		parts := strings.SplitN(*bootstrap, ":", 2)
 		if len(parts) < 2 || len(parts[0]) < 1 || len(parts[1]) < 1 {
-			log.Fatalf("-bootstrap argument requires credentials in format username:token")
+			log.Fatal("-bootstrap argument requires credentials in format username:token")
 		}
 
 		// Add administrator
 		failOnError(authStore.AddUser(parts[0], parts[1], auth.ULAdmin), "Error adding admin user")
 
-		log.WithField("user", parts[0]).Infof("Created admin user")
+		log.Info("Created admin user", zap.String("user", parts[0]))
 	} else {
 		if authStore.CountUsers() < 1 {
 			log.Warn("No config found, you should start stulbe with -boostrap to set-up an administrator!")
@@ -117,10 +100,6 @@ func main() {
 	fatalError(backend.RunHTTPServer(*bind), "HTTP server died unexepectedly")
 }
 
-func wrapLogger(module string) logrus.FieldLogger {
-	return log.WithField("module", module)
-}
-
 func failOnError(err error, text string) {
 	if err != nil {
 		fatalError(err, text)
@@ -129,6 +108,7 @@ func failOnError(err error, text string) {
 
 func fatalError(err error, text string) {
 	if err != nil {
-		log.Fatalf("FATAL ERROR OCCURRED: %s\n\n%s", text, err.Error())
+		fmt.Printf("FATAL ERROR OCCURRED: %s\n%s\n", text, err.Error())
+		os.Exit(1)
 	}
 }

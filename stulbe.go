@@ -6,13 +6,15 @@ import (
 	"net/http"
 	"net/url"
 
-	kv "github.com/strimertul/kilovolt/v6"
+	"go.uber.org/zap"
+
 	"github.com/strimertul/stulbe/auth"
 	"github.com/strimertul/stulbe/database"
 
 	lru "github.com/hashicorp/golang-lru"
-	"github.com/nicklaw5/helix"
-	"github.com/sirupsen/logrus"
+	"github.com/nicklaw5/helix/v2"
+	kv "github.com/strimertul/kilovolt/v8"
+	badger_driver "github.com/strimertul/kv-badgerdb"
 )
 
 type BackendConfig struct {
@@ -26,7 +28,7 @@ type Backend struct {
 	Hub    *kv.Hub
 	DB     *database.DB
 	Auth   *auth.Storage
-	Log    logrus.FieldLogger
+	Log    *zap.Logger
 	Client *helix.Client
 
 	config       BackendConfig
@@ -34,12 +36,12 @@ type Backend struct {
 	channelcache *lru.Cache
 	webhookURL   *url.URL
 	redirectURL  *url.URL
-	httpLogger   logrus.FieldLogger
+	httpLogger   *zap.Logger
 }
 
-func NewBackend(db *database.DB, authStore *auth.Storage, config BackendConfig, log logrus.FieldLogger) (*Backend, error) {
+func NewBackend(db *database.DB, authStore *auth.Storage, config BackendConfig, log *zap.Logger) (*Backend, error) {
 	if log == nil {
-		log = logrus.New()
+		log, _ = zap.NewProduction()
 	}
 
 	redirectURL, err := url.Parse(config.RedirectURL)
@@ -81,7 +83,7 @@ func NewBackend(db *database.DB, authStore *auth.Storage, config BackendConfig, 
 	log.Info("helix api access authorized")
 
 	// Initialize KV (required)
-	hub, err := kv.NewHub(db.Client(), kv.HubOptions{}, wrapLogger(log, "kv"))
+	hub, err := kv.NewHub(badger_driver.NewBadgerBackend(db.Client()), kv.HubOptions{}, wrapLogger(log, "kv"))
 	if err != nil {
 		return nil, fmt.Errorf("could not initialize KV hub: %w", err)
 	}
@@ -104,12 +106,12 @@ func NewBackend(db *database.DB, authStore *auth.Storage, config BackendConfig, 
 
 func (b *Backend) RunHTTPServer(bind string) error {
 	router := b.BindRoutes()
-	b.httpLogger.WithField("bind", bind).Info("starting web server")
+	b.httpLogger.Info("starting web server", zap.String("bind", bind))
 	return http.ListenAndServe(bind, router)
 }
 
-func wrapLogger(log logrus.FieldLogger, module string) logrus.FieldLogger {
-	return log.WithField("module", module)
+func wrapLogger(log *zap.Logger, module string) *zap.Logger {
+	return log.With(zap.String("module", module))
 }
 
 func userNamespace(user string) string {
