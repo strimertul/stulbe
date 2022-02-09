@@ -94,6 +94,7 @@ func NewBackend(db *database.DB, authStore *auth.Storage, config BackendConfig, 
 		Log:    log,
 		Client: client,
 		Hub:    hub,
+		DB:     db,
 
 		usercache:    usercache,
 		channelcache: channelcache,

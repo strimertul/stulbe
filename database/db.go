@@ -43,7 +43,7 @@ func (db *DB) Client() *badger.DB {
 }
 
 func (db *DB) Close() {
-	db.Close()
+	db.client.Close()
 }
 
 func (db *DB) GetKey(key string) ([]byte, error) {
