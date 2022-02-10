@@ -2,6 +2,7 @@ package stulbe
 
 import (
 	"encoding/json"
+	"fmt"
 	"io/ioutil"
 	"net/http"
 	"sync"
@@ -38,15 +39,32 @@ func (b *Backend) webhookCallback(w http.ResponseWriter, req *http.Request) {
 		b.Log.Error("Received invalid webhook")
 		return
 	}
+
+	// Check if we processed this webhook already
+	messageID := req.Header.Get("Twitch-Eventsub-Message-Id")
+	timestamp := req.Header.Get("Twitch-Eventsub-Message-Timestamp")
+	if messageID != "" {
+		if b.webhookcache.Contains(messageID) {
+			b.Log.Debug("Received duplicate webhook, ignoring", zap.String("messageID", messageID))
+			_, _ = fmt.Fprintf(w, "Ok")
+			return
+		}
+	}
+	defer b.webhookcache.Add(messageID, timestamp)
+
 	var vals eventSubNotification
 	err = jsoniter.ConfigFastest.Unmarshal(body, &vals)
 	if err != nil {
 		b.Log.Error("cannot decode event", zap.Error(err))
 		return
 	}
+
 	// if there's a challenge in the request, respond with only the challenge to verify your eventsub.
 	if vals.Challenge != "" {
-		w.Write([]byte(vals.Challenge))
+		_, err = w.Write([]byte(vals.Challenge))
+		if err != nil {
+			b.Log.Error("cannot write challenge", zap.Error(err))
+		}
 		return
 	}
 	webhookMutex.Lock()
@@ -68,4 +86,5 @@ func (b *Backend) webhookCallback(w http.ResponseWriter, req *http.Request) {
 	if err != nil {
 		b.Log.Error("Could not store archive in KV", zap.Error(err))
 	}
+	_, _ = fmt.Fprintf(w, "Ok")
 }
