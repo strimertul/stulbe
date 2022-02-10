@@ -8,6 +8,8 @@ import (
 
 	"github.com/dgraph-io/badger/v3"
 	"github.com/nicklaw5/helix/v2"
+	kv "github.com/strimertul/kilovolt/v8"
+	badger_driver "github.com/strimertul/kv-badgerdb"
 	"go.uber.org/zap"
 
 	"github.com/strimertul/stulbe"
@@ -23,6 +25,7 @@ func main() {
 	debug := flag.Bool("debug", false, "Enable debug logging")
 	bootstrap := flag.String("bootstrap", "", "Create admin user with given credentials (user:token)")
 	regenerateSecret := flag.Bool("regen-secret", false, "Force secret key generation, this will invalidate all previous session!")
+	clearSubscriptions := flag.String("clear-subs", "", "If specified, clear all existing subscription in websocket for user")
 	flag.Parse()
 
 	if *debug {
@@ -36,9 +39,18 @@ func main() {
 	}
 
 	// Open DB
-	db, err := database.Open(badger.DefaultOptions(*dbdir).WithSyncWrites(true), log.With(zap.String("module", "db")))
+	dbclient, err := badger.Open(badger.DefaultOptions(*dbdir).WithSyncWrites(true))
 	failOnError(err, "Could not open DB")
-	defer db.Close()
+	defer dbclient.Close()
+
+	// Initialize KV (required)
+	hub, err := kv.NewHub(badger_driver.NewBadgerBackend(dbclient), kv.HubOptions{}, log.With(zap.String("module", "kv")))
+	failOnError(err, "could not initialize KV hub")
+	go hub.Run()
+
+	// Create DB module
+	db, err := database.NewDBModule(hub, log.With(zap.String("module", "db")))
+	failOnError(err, "could not initialize DB module")
 
 	authStore, err := auth.Init(db, auth.Options{
 		Logger:              log.With(zap.String("module", "auth")),
@@ -85,7 +97,7 @@ func main() {
 	}
 
 	// Create Twitch client
-	backend, err := stulbe.NewBackend(db, authStore, stulbe.BackendConfig{
+	backend, err := stulbe.NewBackend(hub, db, authStore, stulbe.BackendConfig{
 		WebhookSecret: webhookSecret,
 		WebhookURL:    webhookURL,
 		RedirectURL:   redirectURL,
@@ -96,6 +108,15 @@ func main() {
 		},
 	}, log)
 	failOnError(err, "Could not create backend")
+
+	if *clearSubscriptions != "" {
+		deleted, err := backend.ClearSubscriptions(*clearSubscriptions)
+		if err != nil {
+			log.Error("Error clearing subscriptions", zap.Error(err))
+		} else {
+			log.Info("Cleared subscriptions", zap.Int("deleted", deleted))
+		}
+	}
 
 	fatalError(backend.RunHTTPServer(*bind), "HTTP server died unexepectedly")
 }

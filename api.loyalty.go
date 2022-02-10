@@ -4,8 +4,9 @@ import (
 	"net/http"
 	"strings"
 
+	kv "github.com/strimertul/kilovolt/v8"
+
 	"github.com/gorilla/mux"
-	"github.com/strimertul/stulbe/database"
 )
 
 const loyaltyConfigKey = "loyalty/config"
@@ -68,7 +69,7 @@ func (b *Backend) apiLoyaltyConfig(w http.ResponseWriter, r *http.Request) {
 
 	data := loyaltyConfig{}
 	err = b.DB.GetJSON(configKey, &data)
-	if err != nil && err != database.ErrKeyNotFound {
+	if err != nil && err != kv.ErrorKeyNotFound {
 		jsonErr(w, "error fetching data: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -94,7 +95,7 @@ func (b *Backend) apiLoyaltyRewards(w http.ResponseWriter, r *http.Request) {
 
 	data := loyaltyRewardStorage{}
 	err = b.DB.GetJSON(rewardKey, &data)
-	if err != nil && err != database.ErrKeyNotFound {
+	if err != nil && err != kv.ErrorKeyNotFound {
 		jsonErr(w, "error fetching data: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -114,7 +115,7 @@ func (b *Backend) apiLoyaltyGoals(w http.ResponseWriter, r *http.Request) {
 
 	data := loyaltyGoalStorage{}
 	err = b.DB.GetJSON(goalKey, &data)
-	if err != nil && err != database.ErrKeyNotFound {
+	if err != nil && err != kv.ErrorKeyNotFound {
 		jsonErr(w, "error fetching data: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -146,7 +147,7 @@ func (b *Backend) apiLoyaltyUserData(w http.ResponseWriter, r *http.Request) {
 	var data loyaltyPointsEntry
 	err = b.DB.GetJSON(pointsKey, &data)
 	if err != nil {
-		if err != database.ErrKeyNotFound {
+		if err != kv.ErrorKeyNotFound {
 			jsonErr(w, "error fetching points: "+err.Error(), http.StatusInternalServerError)
 			return
 		} else {

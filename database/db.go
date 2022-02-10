@@ -1,110 +1,151 @@
 package database
 
 import (
-	"context"
+	"fmt"
 
-	"github.com/dgraph-io/badger/v3/pb"
-
-	"github.com/dgraph-io/badger/v3"
 	jsoniter "github.com/json-iterator/go"
+	kv "github.com/strimertul/kilovolt/v8"
 	"go.uber.org/zap"
 )
 
 var json = jsoniter.ConfigFastest
 
 var (
-	ErrKeyNotFound = badger.ErrKeyNotFound
+	// ErrUnknown is returned when a response is received that doesn't match any expected outcome.
+	ErrUnknown = fmt.Errorf("unknown error")
 )
 
-type DB struct {
-	client *badger.DB
+type DBModule struct {
+	client *kv.LocalClient
+	hub    *kv.Hub
 	logger *zap.Logger
 }
 
-type ModifiedKV struct {
-	Key     string
-	Data    []byte
-	Meta    []byte
-	Version uint64
-	Expires uint64
+type KvPair struct {
+	Key  string
+	Data string
 }
 
-func Open(options badger.Options, logger *zap.Logger) (*DB, error) {
-	client, err := badger.Open(options)
-
-	return &DB{
-		client: client,
-		logger: logger,
-	}, err
-}
-
-func (db *DB) Client() *badger.DB {
-	return db.client
-}
-
-func (db *DB) Close() {
-	db.client.Close()
-}
-
-func (db *DB) GetKey(key string) ([]byte, error) {
-	var byt []byte
-	err := db.client.View(func(t *badger.Txn) error {
-		item, err := t.Get([]byte(key))
-		if err != nil {
-			return err
-		}
-		byt, err = item.ValueCopy(nil)
-		return err
-	})
-	return byt, err
-}
-
-func (db *DB) PutKey(key string, data []byte) error {
-	return db.client.Update(func(t *badger.Txn) error {
-		return t.Set([]byte(key), data)
-	})
-}
-
-func (db *DB) Subscribe(ctx context.Context, fn func(changed []ModifiedKV) error, prefixes ...string) error {
-	prefixList := make([]pb.Match, len(prefixes))
-	for index, prefix := range prefixes {
-		prefixList[index] = pb.Match{Prefix: []byte(prefix)}
+func NewDBModule(hub *kv.Hub, logger *zap.Logger) (*DBModule, error) {
+	localClient := kv.NewLocalClient(kv.ClientOptions{}, logger)
+	go localClient.Run()
+	hub.AddClient(localClient)
+	localClient.Wait()
+	err := hub.SetAuthenticated(localClient.UID(), true)
+	if err != nil {
+		return nil, err
 	}
-	return db.client.Subscribe(ctx, func(kv *badger.KVList) error {
-		modified := make([]ModifiedKV, len(kv.Kv))
-		for index, newKV := range kv.Kv {
-			modified[index] = ModifiedKV{
-				Key:     string(newKV.Key),
-				Data:    newKV.Value,
-				Meta:    newKV.UserMeta,
-				Version: newKV.Version,
-				Expires: newKV.ExpiresAt,
-			}
-		}
-		return fn(modified)
-	}, prefixList)
+	module := &DBModule{
+		client: localClient,
+		hub:    hub,
+		logger: logger,
+	}
+
+	return module, nil
 }
 
-func (db *DB) GetJSON(key string, dst interface{}) error {
-	return db.client.View(func(t *badger.Txn) error {
-		item, err := t.Get([]byte(key))
-		if err != nil {
-			return err
-		}
-		byt, err := item.ValueCopy(nil)
-		if err != nil {
-			return err
-		}
-		return json.Unmarshal(byt, dst)
-	})
+func (mod *DBModule) Hub() *kv.Hub {
+	return mod.hub
 }
 
-func (db *DB) PutJSON(key string, data interface{}) error {
-	return db.client.Update(func(t *badger.Txn) error {
-		byt, err := json.Marshal(data)
+func (mod *DBModule) Close() error {
+	mod.hub.RemoveClient(mod.client)
+	return nil
+}
+
+func (mod *DBModule) GetKey(key string) (string, error) {
+	res, err := mod.makeRequest(kv.CmdReadKey, map[string]interface{}{"key": key})
+	if err != nil {
+		return "", err
+	}
+	return res.Data.(string), nil
+}
+
+func (mod *DBModule) PutKey(key string, data string) error {
+	_, err := mod.makeRequest(kv.CmdWriteKey, map[string]interface{}{"key": key, "data": data})
+	return err
+}
+
+func (mod *DBModule) Subscribe(fn kv.SubscriptionCallback, prefixes ...string) error {
+	for _, prefix := range prefixes {
+		_, err := mod.makeRequest(kv.CmdSubscribePrefix, map[string]interface{}{"prefix": prefix})
 		if err != nil {
 			return err
 		}
-		return t.Set([]byte(key), byt)
-	})
+		mod.client.SetPrefixSubCallback(prefix, fn)
+	}
+	return nil
+}
+
+func (mod *DBModule) GetJSON(key string, dst interface{}) error {
+	res, err := mod.GetKey(key)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal([]byte(res), dst)
+}
+
+func (mod *DBModule) GetAll(prefix string) (map[string]string, error) {
+	res, err := mod.makeRequest(kv.CmdReadPrefix, map[string]interface{}{"prefix": prefix})
+	if err != nil {
+		return nil, err
+	}
+
+	out := make(map[string]string)
+	for key, value := range res.Data.(map[string]interface{}) {
+		out[key] = value.(string)
+	}
+	return out, nil
+}
+
+func (mod *DBModule) PutJSON(key string, data interface{}) error {
+	byt, err := json.Marshal(data)
+	if err != nil {
+		return err
+	}
+
+	return mod.PutKey(key, string(byt))
+}
+
+func (mod *DBModule) PutJSONBulk(kvs map[string]interface{}) error {
+	encoded := make(map[string]interface{})
+	for k, v := range kvs {
+		byt, err := json.Marshal(v)
+		if err != nil {
+			return err
+		}
+		encoded[k] = string(byt)
+	}
+	_, chn := mod.client.MakeRequest(kv.CmdWriteBulk, encoded)
+	_, err := getResponse(<-chn)
+	return err
+}
+
+func (mod *DBModule) RemoveKey(key string) error {
+	// TODO
+	return mod.PutKey(key, "")
+}
+
+func (mod *DBModule) makeRequest(cmd string, data map[string]interface{}) (kv.Response, error) {
+	req, chn := mod.client.MakeRequest(cmd, data)
+	mod.hub.SendMessage(req)
+	return getResponse(<-chn)
+}
+
+func getResponse(response interface{}) (kv.Response, error) {
+	switch c := response.(type) {
+	case kv.Response:
+		return c, nil
+	case kv.Error:
+		return kv.Response{}, &KvError{c}
+	}
+	return kv.Response{}, ErrUnknown
+}
+
+type KvError struct {
+	ErrorData kv.Error
+}
+
+func (kv *KvError) Error() string {
+	return fmt.Sprintf("%s: %s", kv.ErrorData.Error, kv.ErrorData.Details)
 }

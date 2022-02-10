@@ -14,8 +14,8 @@ import (
 	jsoniter "github.com/json-iterator/go"
 	"github.com/nicklaw5/helix/v2"
 
+	kv "github.com/strimertul/kilovolt/v8"
 	"github.com/strimertul/stulbe/auth"
-	"github.com/strimertul/stulbe/database"
 )
 
 func (b Backend) apiTwitchAuthRedirect(w http.ResponseWriter, req *http.Request) {
@@ -28,7 +28,7 @@ func (b Backend) apiTwitchAuthRedirect(w http.ResponseWriter, req *http.Request)
 	uri := b.Client.GetAuthorizationURL(&helix.AuthorizationURLParams{
 		ResponseType: "code",
 		State:        claims.User,
-		Scopes:       []string{"bits:read channel:read:subscriptions channel:read:redemptions channel:read:polls channel:read:predictions channel:read:hype_train"},
+		Scopes:       []string{"bits:read channel:read:subscriptions channel:read:redemptions channel:read:polls channel:read:predictions channel:read:hype_train user_read"},
 	})
 	jsonResponse(w, struct {
 		AuthorizationURL string `json:"auth_url"`
@@ -100,6 +100,11 @@ func (b *Backend) authorizeCallback(w http.ResponseWriter, req *http.Request) {
 	users, err := client.GetUsers(&helix.UsersParams{})
 	if err != nil {
 		jsonErr(w, "failed looking up user: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if len(users.Data.Users) < 1 {
+		jsonErr(w, "no users found", http.StatusInternalServerError)
 		return
 	}
 	user := users.Data.Users[0]
@@ -298,7 +303,7 @@ func (b *Backend) getUserClient(req *http.Request) (*helix.Client, error) {
 func (b *Backend) apiTwitchUserData(w http.ResponseWriter, req *http.Request) {
 	client, err := b.getUserClient(req)
 	if err != nil {
-		if err == database.ErrKeyNotFound {
+		if err == kv.ErrorKeyNotFound {
 			jsonErr(w, "twitch user not authenticated", http.StatusFailedDependency)
 			return
 		}
@@ -340,23 +345,11 @@ func (b *Backend) apiTwitchClearSubscriptions(w http.ResponseWriter, req *http.R
 		jsonErr(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	subs, err := b.Client.GetEventSubSubscriptions(&helix.EventSubSubscriptionsParams{})
+
+	deleted, err := b.ClearSubscriptions(claims.User)
 	if err != nil {
-		jsonErr(w, "failed looking up subscriptions: "+err.Error(), http.StatusInternalServerError)
+		jsonErr(w, err.Error(), http.StatusInternalServerError)
 		return
-	}
-	deleted := 0
-	for _, sub := range subs.Data.EventSubSubscriptions {
-		// Ignore subscriptions that aren't for this service
-		if !strings.HasSuffix(sub.Transport.Callback, claims.User) {
-			continue
-		}
-		_, err := b.Client.RemoveEventSubSubscription(sub.ID)
-		if err != nil {
-			jsonErr(w, "failed removing subscription: "+err.Error(), http.StatusInternalServerError)
-			return
-		}
-		deleted++
 	}
 
 	jsonResponse(w, struct {
@@ -366,4 +359,24 @@ func (b *Backend) apiTwitchClearSubscriptions(w http.ResponseWriter, req *http.R
 		true,
 		deleted,
 	})
+}
+
+func (b *Backend) ClearSubscriptions(user string) (int, error) {
+	subs, err := b.Client.GetEventSubSubscriptions(&helix.EventSubSubscriptionsParams{})
+	if err != nil {
+		return -1, fmt.Errorf("failed looking up subscriptions: %w", err)
+	}
+	deleted := 0
+	for _, sub := range subs.Data.EventSubSubscriptions {
+		// Ignore subscriptions that aren't for this service
+		if !strings.HasSuffix(sub.Transport.Callback, user) {
+			continue
+		}
+		_, err := b.Client.RemoveEventSubSubscription(sub.ID)
+		if err != nil {
+			return deleted, fmt.Errorf("failed removing subscription: %w", err)
+		}
+		deleted++
+	}
+	return deleted, nil
 }

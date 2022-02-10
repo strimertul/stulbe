@@ -4,13 +4,15 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 
+	kv "github.com/strimertul/kilovolt/v8"
+
 	"go.uber.org/zap"
 
 	"github.com/strimertul/stulbe/database"
 )
 
 type Storage struct {
-	db        *database.DB
+	db        *database.DBModule
 	users     UserList
 	secretKey []byte
 	logger    *zap.Logger
@@ -23,7 +25,7 @@ type Options struct {
 
 const secretKey = "stulbe-auth/secret"
 
-func Init(db *database.DB, options Options) (*Storage, error) {
+func Init(db *database.DBModule, options Options) (*Storage, error) {
 	store := &Storage{
 		db:        db,
 		users:     nil,
@@ -34,7 +36,7 @@ func Init(db *database.DB, options Options) (*Storage, error) {
 	// Get user/session lists from DB, if we can
 	err := db.GetJSON(usersKey, &store.users)
 	if err != nil {
-		if err == database.ErrKeyNotFound {
+		if err == kv.ErrorKeyNotFound {
 			store.users = make(UserList)
 			store.logger.Warn("user storage not found, initializing new one")
 		} else {
@@ -48,9 +50,9 @@ func Init(db *database.DB, options Options) (*Storage, error) {
 			return nil, err
 		}
 	} else {
-		store.secretKey, err = db.GetKey(secretKey)
+		hexkey, err := db.GetKey(secretKey)
 		if err != nil {
-			if err == database.ErrKeyNotFound {
+			if err == kv.ErrorKeyNotFound {
 				// Generate random key
 				err = store.generateSecret()
 				if err != nil {
@@ -59,6 +61,10 @@ func Init(db *database.DB, options Options) (*Storage, error) {
 			} else {
 				return nil, err
 			}
+		}
+		store.secretKey, err = hex.DecodeString(hexkey)
+		if err != nil {
+			return nil, err
 		}
 	}
 
@@ -72,10 +78,11 @@ func (db *Storage) generateSecret() error {
 	if err != nil {
 		return err
 	}
-	err = db.db.PutKey(secretKey, db.secretKey)
+	hexkey := hex.EncodeToString(db.secretKey)
+	err = db.db.PutKey(secretKey, hexkey)
 	if err != nil {
 		return err
 	}
-	db.logger.Info("generated secret key", zap.String("key", hex.EncodeToString(db.secretKey)))
+	db.logger.Info("generated secret key", zap.String("key", hexkey))
 	return nil
 }

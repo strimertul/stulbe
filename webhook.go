@@ -51,7 +51,7 @@ func (b *Backend) webhookCallback(w http.ResponseWriter, req *http.Request) {
 	}
 	webhookMutex.Lock()
 	defer webhookMutex.Unlock()
-	err = b.DB.PutKey(userNamespace(vars["user"])+"stulbe/ev/webhook", body)
+	err = b.DB.PutKey(userNamespace(vars["user"])+"stulbe/ev/webhook", string(body))
 	if err != nil {
 		b.Log.Error("Could not store event in KV", zap.Error(err))
 	}

@@ -14,7 +14,6 @@ import (
 	lru "github.com/hashicorp/golang-lru"
 	"github.com/nicklaw5/helix/v2"
 	kv "github.com/strimertul/kilovolt/v8"
-	badger_driver "github.com/strimertul/kv-badgerdb"
 )
 
 type BackendConfig struct {
@@ -26,7 +25,7 @@ type BackendConfig struct {
 
 type Backend struct {
 	Hub    *kv.Hub
-	DB     *database.DB
+	DB     *database.DBModule
 	Auth   *auth.Storage
 	Log    *zap.Logger
 	Client *helix.Client
@@ -39,7 +38,7 @@ type Backend struct {
 	httpLogger   *zap.Logger
 }
 
-func NewBackend(db *database.DB, authStore *auth.Storage, config BackendConfig, log *zap.Logger) (*Backend, error) {
+func NewBackend(hub *kv.Hub, db *database.DBModule, authStore *auth.Storage, config BackendConfig, log *zap.Logger) (*Backend, error) {
 	if log == nil {
 		log, _ = zap.NewProduction()
 	}
@@ -81,13 +80,6 @@ func NewBackend(db *database.DB, authStore *auth.Storage, config BackendConfig, 
 	// Set the access token on the client
 	client.SetAppAccessToken(resp.Data.AccessToken)
 	log.Info("helix api access authorized")
-
-	// Initialize KV (required)
-	hub, err := kv.NewHub(badger_driver.NewBadgerBackend(db.Client()), kv.HubOptions{}, wrapLogger(log, "kv"))
-	if err != nil {
-		return nil, fmt.Errorf("could not initialize KV hub: %w", err)
-	}
-	go hub.Run()
 
 	return &Backend{
 		Auth:   authStore,
