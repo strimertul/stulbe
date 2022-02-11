@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/dgraph-io/badger/v3"
 	"github.com/nicklaw5/helix/v2"
@@ -117,6 +118,19 @@ func main() {
 			log.Info("Cleared subscriptions", zap.Int("deleted", deleted))
 		}
 	}
+
+	// Run garbage collection every once in a while
+	go func() {
+		ticker := time.NewTicker(15 * time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			// Run DB garbage collection until it's done
+			var err error
+			for err == nil {
+				err = dbclient.RunValueLogGC(0.5)
+			}
+		}
+	}()
 
 	fatalError(backend.RunHTTPServer(*bind), "HTTP server died unexepectedly")
 }
