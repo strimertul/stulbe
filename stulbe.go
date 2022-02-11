@@ -31,9 +31,9 @@ type Backend struct {
 	Client *helix.Client
 
 	config       BackendConfig
-	usercache    *lru.Cache
-	channelcache *lru.Cache
-	webhookcache *lru.Cache
+	userCache    *lru.Cache
+	channelCache *lru.Cache
+	webhookCache *lru.Cache
 	webhookURL   *url.URL
 	redirectURL  *url.URL
 	httpLogger   *zap.Logger
@@ -55,15 +55,15 @@ func NewBackend(hub *kv.Hub, db *database.DBModule, authStore *auth.Storage, con
 	}
 
 	// Initialize caches to avoid spamming Twitch's APIs
-	usercache, err := lru.New(128)
+	userCache, err := lru.New(128)
 	if err != nil {
 		return nil, fmt.Errorf("could not create LRU cache for users: %w", err)
 	}
-	channelcache, err := lru.New(128)
+	channelCache, err := lru.New(128)
 	if err != nil {
 		return nil, fmt.Errorf("could not create LRU cache for channels: %w", err)
 	}
-	webhookcache, err := lru.New(128)
+	webhookCache, err := lru.New(128)
 	if err != nil {
 		return nil, fmt.Errorf("could not create LRU cache for webhooks: %w", err)
 	}
@@ -93,9 +93,9 @@ func NewBackend(hub *kv.Hub, db *database.DBModule, authStore *auth.Storage, con
 		Hub:    hub,
 		DB:     db,
 
-		usercache:    usercache,
-		channelcache: channelcache,
-		webhookcache: webhookcache,
+		userCache:    userCache,
+		channelCache: channelCache,
+		webhookCache: webhookCache,
 		httpLogger:   wrapLogger(log, "http"),
 		webhookURL:   webhookURL,
 		redirectURL:  redirectURL,

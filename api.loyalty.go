@@ -60,7 +60,7 @@ type loyaltyConfig struct {
 func (b *Backend) apiLoyaltyConfig(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 
-	channel, err := b.GetChannelByID(vars["channelid"])
+	channel, err := b.GetChannelByID(vars["channelID"])
 	if err != nil {
 		jsonErr(w, "error fetching channel data: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -86,7 +86,7 @@ func (b *Backend) apiLoyaltyConfig(w http.ResponseWriter, r *http.Request) {
 func (b *Backend) apiLoyaltyRewards(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 
-	channel, err := b.GetChannelByID(vars["channelid"])
+	channel, err := b.GetChannelByID(vars["channelID"])
 	if err != nil {
 		jsonErr(w, "error fetching channel data: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -106,7 +106,7 @@ func (b *Backend) apiLoyaltyRewards(w http.ResponseWriter, r *http.Request) {
 func (b *Backend) apiLoyaltyGoals(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 
-	channel, err := b.GetChannelByID(vars["channelid"])
+	channel, err := b.GetChannelByID(vars["channelID"])
 	if err != nil {
 		jsonErr(w, "error fetching channel data: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -126,7 +126,7 @@ func (b *Backend) apiLoyaltyGoals(w http.ResponseWriter, r *http.Request) {
 func (b *Backend) apiLoyaltyUserData(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 
-	channel, err := b.GetChannelByID(vars["channelid"])
+	channel, err := b.GetChannelByID(vars["channelID"])
 	if err != nil {
 		jsonErr(w, "error fetching channel data: "+err.Error(), http.StatusInternalServerError)
 		return

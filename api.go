@@ -57,10 +57,10 @@ func (b *Backend) bindApiRoutes(r *mux.Router) {
 	post.HandleFunc("/auth", b.apiAuth)
 
 	// Loyalty endpoints (public)
-	get.HandleFunc("/stream/{channelid}/loyalty/config", b.apiLoyaltyConfig)
-	get.HandleFunc("/stream/{channelid}/loyalty/rewards", b.apiLoyaltyRewards)
-	get.HandleFunc("/stream/{channelid}/loyalty/goals", b.apiLoyaltyGoals)
-	get.HandleFunc("/stream/{channelid}/loyalty/info/{uid}", b.apiLoyaltyUserData)
+	get.HandleFunc("/stream/{channelID}/loyalty/config", b.apiLoyaltyConfig)
+	get.HandleFunc("/stream/{channelID}/loyalty/rewards", b.apiLoyaltyRewards)
+	get.HandleFunc("/stream/{channelID}/loyalty/goals", b.apiLoyaltyGoals)
+	get.HandleFunc("/stream/{channelID}/loyalty/info/{uid}", b.apiLoyaltyUserData)
 
 	post.HandleFunc("/twitch/authorize", b.wrapAuth(b.apiTwitchAuthRedirect))
 	get.HandleFunc("/twitch/user", b.wrapAuth(b.apiTwitchUserData))
@@ -146,7 +146,7 @@ func (b *Backend) apiAuth(w http.ResponseWriter, r *http.Request) {
 	})
 }
 func (b *Backend) GetChannelByID(channelid string) (string, error) {
-	channelName, ok := b.channelcache.Get(channelid)
+	channelName, ok := b.channelCache.Get(channelid)
 	if !ok {
 		resp, err := b.Client.GetChannelInformation(&helix.GetChannelInformationParams{
 			BroadcasterID: channelid,
@@ -161,13 +161,13 @@ func (b *Backend) GetChannelByID(channelid string) (string, error) {
 			return "", errors.New("user id not found")
 		}
 		channelName = strings.ToLower(resp.Data.Channels[0].BroadcasterName)
-		b.channelcache.Add(channelid, channelName)
+		b.channelCache.Add(channelid, channelName)
 	}
 	return channelName.(string), nil
 }
 
 func (b *Backend) GetUserByID(userid string) (helix.User, error) {
-	username, ok := b.usercache.Get(userid)
+	username, ok := b.userCache.Get(userid)
 	if !ok {
 		resp, err := b.Client.GetUsers(&helix.UsersParams{
 			IDs: []string{userid},
@@ -182,7 +182,7 @@ func (b *Backend) GetUserByID(userid string) (helix.User, error) {
 			return helix.User{}, errors.New("user id not found")
 		}
 		username = resp.Data.Users[0]
-		b.usercache.Add(userid, username)
+		b.userCache.Add(userid, username)
 	}
 	return username.(helix.User), nil
 }

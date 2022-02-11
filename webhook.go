@@ -44,13 +44,13 @@ func (b *Backend) webhookCallback(w http.ResponseWriter, req *http.Request) {
 	messageID := req.Header.Get("Twitch-Eventsub-Message-Id")
 	timestamp := req.Header.Get("Twitch-Eventsub-Message-Timestamp")
 	if messageID != "" {
-		if b.webhookcache.Contains(messageID) {
+		if b.webhookCache.Contains(messageID) {
 			b.Log.Debug("Received duplicate webhook, ignoring", zap.String("messageID", messageID))
 			_, _ = fmt.Fprintf(w, "Ok")
 			return
 		}
 	}
-	defer b.webhookcache.Add(messageID, timestamp)
+	defer b.webhookCache.Add(messageID, timestamp)
 
 	var vals eventSubNotification
 	err = jsoniter.ConfigFastest.Unmarshal(body, &vals)

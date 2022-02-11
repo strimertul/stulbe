@@ -64,12 +64,12 @@ func (b *Backend) authorizeCallback(w http.ResponseWriter, req *http.Request) {
 		"code":          {code},
 		"redirect_uri":  {b.config.Twitch.RedirectURI},
 	}
-	authreq, err := http.NewRequest("POST", "https://id.twitch.tv/oauth2/token?"+query.Encode(), nil)
+	authRequest, err := http.NewRequest("POST", "https://id.twitch.tv/oauth2/token?"+query.Encode(), nil)
 	if err != nil {
 		jsonErr(w, "failed creating auth request: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	resp, err := http.DefaultClient.Do(authreq)
+	resp, err := http.DefaultClient.Do(authRequest)
 	if err != nil {
 		jsonErr(w, "failed sending auth request: "+err.Error(), http.StatusInternalServerError)
 		return
